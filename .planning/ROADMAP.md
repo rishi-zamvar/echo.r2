@@ -51,7 +51,7 @@ Plans:
   5. One install script per OS (`install.sh` launchd on Mac; `install.ps1` scheduled task + firewall on PC) sets up autostart and Claude hooks; one deploy script updates the hub from git.
 **Plans**: 7 plans
 Plans:
-- [ ] 02-01-PLAN.md — Tailnet listener (retry-bind) + whois fail-closed + /health gitSha (HUB-02, HUB-03)
+- [x] 02-01-PLAN.md — Tailnet listener (retry-bind) + whois fail-closed + /health gitSha (HUB-02, HUB-03)
 - [ ] 02-02-PLAN.md — Pair code → bearer token, devices/revoke, cli pair/devices/revoke (AUTH-01, AUTH-03, HUB-02)
 - [ ] 02-03-PLAN.md — cwd allowlist + /sessions/roots, /hook/ext global-hook receiver, rotating hub.log (HUB-02, HUB-04)
 - [ ] 02-04-PLAN.md — Mac install.sh/uninstall.sh/deploy.sh (launchd), hooks-merge.js, RUNBOOK (HUB-01, HUB-04)
@@ -104,6 +104,6 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Hub Session Engine | 4/6 | In Progress|  |
-| 2. Secure Hub & PC Install | 0/7 | Not started | - |
+| 2. Secure Hub & PC Install | 1/7 | In Progress|  |
 | 3. iOS App | 0/TBD | Not started | - |
 | 4. Push, Recovery & Release | 0/TBD | Not started | - |
