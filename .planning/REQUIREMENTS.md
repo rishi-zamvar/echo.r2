@@ -14,9 +14,9 @@
 
 ### Pairing & Auth
 
-- [ ] **AUTH-01**: Rishi can pair the phone by entering a single-use, 5-minute code printed by a local `hub pair` command
+- [x] **AUTH-01**: Rishi can pair the phone by entering a single-use, 5-minute code printed by a local `hub pair` command
 - [ ] **AUTH-02**: Paired phone stays authenticated across app restarts (token in Keychain, sent in header)
-- [ ] **AUTH-03**: Rishi can revoke a paired device from the PC; the app returns to pairing on 401
+- [x] **AUTH-03**: Rishi can revoke a paired device from the PC; the app returns to pairing on 401
 
 ### Sessions
 
@@ -103,8 +103,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HUB-02 | Phase 2 | Complete |
 | HUB-03 | Phase 2 | Complete |
 | HUB-04 | Phase 2 | Pending |
-| AUTH-01 | Phase 2 | Pending |
-| AUTH-03 | Phase 2 | Pending |
+| AUTH-01 | Phase 2 | Complete |
+| AUTH-03 | Phase 2 | Complete |
 | APP-01 | Phase 3 | Pending |
 | AUTH-02 | Phase 3 | Pending |
 | SESS-01 | Phase 3 | Pending |
