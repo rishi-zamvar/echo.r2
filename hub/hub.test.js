@@ -6,8 +6,8 @@ import path from 'node:path';
 import WebSocket from 'ws';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
-import { startHub } from './server.js';
-import { makeWhois } from './auth.js';
+import { startHub, openLog } from './server.js';
+import { makeWhois, inRoots } from './auth.js';
 import { EventLog } from './eventlog.js';
 import { scrubEnv, transition } from './sessions.js';
 
@@ -33,7 +33,7 @@ const setTs = (patch) => fs.writeFileSync(tsState, JSON.stringify({ ...(fs.exist
 setTs({ ip: '127.0.0.1', whois: OWNER, exit: 0 });
 process.env.FAKE_TS_STATE = tsState;
 const hubDir = tmp();
-fs.writeFileSync(path.join(hubDir, 'config.json'), JSON.stringify({ owner: 'owner@example.com' }));
+fs.writeFileSync(path.join(hubDir, 'config.json'), JSON.stringify({ owner: 'owner@example.com', roots: [fs.realpathSync(os.tmpdir())] }));
 const hub = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: hubDir, killOnClose: true, hookPort: 0,
   tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, whoisTtlMs: 0 });
 const tb = `http://127.0.0.1:${await hub.tailnetReady}`;
@@ -635,4 +635,96 @@ test('owner captured at first pair', async () => {
     as('other@example.com');
     assert.equal((await fetch(`${t2}/health`)).status, 403);
   } finally { h2.close(); process.env.FAKE_TS_STATE = prev; }
+});
+
+// ---- phase 2 plan 03: allowlist, roots, ext hooks, log ----
+const rootReal = fs.realpathSync(os.tmpdir());
+test('cwd allowlist', async () => {
+  const { token } = await pairDevice();
+  const h = bearer(token);
+  const bad = async (cwd, b = base, hh = {}) => {
+    const r = await jpost(`${b}/sessions`, { cwd }, hh);
+    assert.equal(r.status, 400);
+    assert.equal((await r.json()).error, 'bad_cwd');
+  };
+  await bad(path.dirname(rootReal));
+  await bad(path.join(tmp(), 'nope'));
+  await bad(path.dirname(rootReal), tb, h);
+  if (process.platform !== 'win32') {
+    const d = tmp();
+    fs.symlinkSync('/', path.join(d, 'esc'));
+    await bad(path.join(d, 'esc'));
+    await bad(path.join(d, 'esc'), tb, h);
+  }
+  const ok = await jpost(`${tb}/sessions`, { cwd: tmp() }, h);
+  assert.equal(ok.status, 201);
+  // prefix sibling
+  const evil = rootReal + '-evil';
+  fs.mkdirSync(evil, { recursive: true });
+  try {
+    assert.equal(inRoots(evil, [rootReal]), false);
+    assert.equal(inRoots(rootReal, [rootReal]), true);
+    assert.equal(inRoots(tmp(), [rootReal]), true);
+    assert.equal(inRoots('relative', [rootReal]), false);
+    assert.equal(inRoots(undefined, [rootReal]), false);
+  } finally { fs.rmSync(evil, { recursive: true }); }
+});
+
+test('sessions roots', async () => {
+  const { token } = await pairDevice();
+  const d = tmp();
+  fs.mkdirSync(path.join(d, 'proj'));
+  fs.mkdirSync(path.join(d, '.hidden'));
+  assert.equal((await fetch(`${tb}/sessions/roots`)).status, 401);
+  const r = await fetch(`${tb}/sessions/roots`, { headers: bearer(token) });
+  assert.equal(r.status, 200);
+  const { roots } = await r.json();
+  assert.equal(roots[0].root, rootReal);
+  assert.ok(roots[0].dirs.includes(path.basename(d)));
+  assert.ok(!roots[0].dirs.some((n) => n.startsWith('.')));
+  assert.deepEqual(inRootsList(), roots.map((x) => x.root));
+});
+const inRootsList = () => [rootReal];
+
+test('ext hook', async () => {
+  const ext = (body, seg = hub.config.hookSecret) => fetch(`http://127.0.0.1:${hub.hookPort}/hook/ext/${seg}`, { method: 'POST', body: JSON.stringify(body) });
+  const id = crypto.randomUUID();
+  assert.equal((await ext(hp(id, 'Stop', { cwd: tmp() }))).status, 200);
+  await waitFor(() => hub.sessions.get(id));
+  const x = (await (await fetch(`${base}/sessions`)).json()).sessions.find((s) => s.id === id);
+  assert.equal(x.source, 'external');
+  assert.equal((await ext(hp(id, 'Stop'), 'deadbeef')).status, 403);
+  assert.equal((await ext(hp(id, 'Stop'), 'x'.repeat(32))).status, 403);
+  const own = await create();
+  await waitFor(() => st(own) === 'running');
+  assert.equal((await ext(hp(own, 'Stop'))).status, 200);
+  await sleep(1800);
+  assert.equal(st(own), 'running');
+  assert.equal(hub.sessions.list().filter((s) => s.id === own).length, 1);
+});
+
+test('log rotation', () => {
+  const f = path.join(tmp(), 'hub.log');
+  fs.writeFileSync(f, 'a'.repeat(200));
+  const log = openLog(f, { maxBytes: 100 });
+  log('hello', 'world');
+  log.close();
+  assert.equal(fs.readFileSync(f + '.1', 'utf8'), 'a'.repeat(200));
+  assert.ok(fs.statSync(f).size < 100);
+  assert.match(fs.readFileSync(f, 'utf8'), /^\d{4}-\d\d-\d\dT[\d:.]+Z hello world\n$/);
+});
+
+test('no secrets in log', async () => {
+  const out = [];
+  const [ol, oe] = [console.log, console.error];
+  console.log = console.error = (...a) => out.push(a.join(' '));
+  let code, token;
+  try {
+    code = await mintCode();
+    const r = await jpost(`${tb}/pair`, { code, deviceName: 'logcheck' });
+    token = (await r.json()).token;
+    await fetch(`${tb}/sessions`, { headers: bearer(token) });
+  } finally { console.log = ol; console.error = oe; }
+  const text = out.join('\n');
+  assert.ok(!text.includes(code) && !text.includes(token));
 });
