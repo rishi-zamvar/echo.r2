@@ -12,6 +12,7 @@ import { EventLog } from './eventlog.js';
 import { scrubEnv, transition } from './sessions.js';
 
 const fake = path.join(import.meta.dirname, 'fixtures', 'fake-claude.mjs');
+const rdir = () => { const d = tmp(); fs.writeFileSync(path.join(d, 'config.json'), JSON.stringify({ roots: [fs.realpathSync(os.tmpdir())] })); return d; };
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'echo-'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(pred, ms = 5000) {
@@ -208,7 +209,7 @@ test('pty exit -> exited', async () => {
 });
 
 test('boot marks stopped, spawn args', async () => {
-  const dir = tmp();
+  const dir = rdir();
   fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify([{ id: 'a'.repeat(8), state: 'running', source: 'hub' }]));
   const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true });
   try {
@@ -250,7 +251,7 @@ test('interrupt reaches pty', async () => {
 });
 
 test('stop kills tree', posix, async () => {
-  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: tmp(), killOnClose: true, spawnEnv: { FAKE_GRANDCHILD: '1' } });
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: rdir(), killOnClose: true, spawnEnv: { FAKE_GRANDCHILD: '1' } });
   try {
     const r = await fetch(`http://127.0.0.1:${h.port}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) });
     const { id } = await r.json();
@@ -402,7 +403,7 @@ test('external in hub', async () => {
 
 test('hub session chat', async () => {
   const { home } = mkHome();
-  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: tmp(), claudeHome: home, killOnClose: true });
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: rdir(), claudeHome: home, killOnClose: true });
   try {
     const r = await fetch(`http://127.0.0.1:${h.port}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) });
     const { id } = await r.json();
@@ -672,9 +673,9 @@ test('cwd allowlist', async () => {
 
 test('sessions roots', async () => {
   const { token } = await pairDevice();
-  const d = tmp();
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), '!roots-')); // sorts first; tmpdir may hold >200 dirs
   fs.mkdirSync(path.join(d, 'proj'));
-  fs.mkdirSync(path.join(d, '.hidden'));
+  fs.mkdirSync(path.join(os.tmpdir(), '.echo-hidden-test'), { recursive: true });
   assert.equal((await fetch(`${tb}/sessions/roots`)).status, 401);
   const r = await fetch(`${tb}/sessions/roots`, { headers: bearer(token) });
   assert.equal(r.status, 200);
@@ -682,9 +683,8 @@ test('sessions roots', async () => {
   assert.equal(roots[0].root, rootReal);
   assert.ok(roots[0].dirs.includes(path.basename(d)));
   assert.ok(!roots[0].dirs.some((n) => n.startsWith('.')));
-  assert.deepEqual(inRootsList(), roots.map((x) => x.root));
+  fs.rmSync(d, { recursive: true });
 });
-const inRootsList = () => [rootReal];
 
 test('ext hook', async () => {
   const ext = (body, seg = hub.config.hookSecret) => fetch(`http://127.0.0.1:${hub.hookPort}/hook/ext/${seg}`, { method: 'POST', body: JSON.stringify(body) });

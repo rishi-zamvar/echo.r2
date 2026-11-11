@@ -12,12 +12,15 @@ export function writeHooksFile(file, hookPort) {
   fs.writeFileSync(file, JSON.stringify({ hooks: { Stop: entry, Notification: entry } }));
 }
 
-export function startHookServer({ port = +process.env.ECHO_HOOK_PORT || 8791, secret, onHook }) {
+export function startHookServer({ port = +process.env.ECHO_HOOK_PORT || 8791, secret, extSecret, onHook, onExtHook }) {
   const want = Buffer.from(secret);
+  const wantExt = Buffer.from(String(extSecret ?? ''));
   const server = http.createServer((req, res) => {
-    if (req.method !== 'POST' || req.url !== '/hook') { res.writeHead(404); return res.end(); }
-    const got = Buffer.from(String(req.headers['x-echo-secret'] ?? ''));
-    if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) { res.writeHead(403); return res.end(); }
+    const ext = req.method === 'POST' && extSecret && req.url.startsWith('/hook/ext/');
+    if (req.method !== 'POST' || (req.url !== '/hook' && !ext)) { res.writeHead(404); return res.end(); }
+    const got = Buffer.from(ext ? req.url.slice('/hook/ext/'.length) : String(req.headers['x-echo-secret'] ?? ''));
+    const want_ = ext ? wantExt : want;
+    if (got.length !== want_.length || !crypto.timingSafeEqual(got, want_)) { res.writeHead(403); return res.end(); }
     let size = 0;
     const chunks = [];
     req.on('data', (c) => {
@@ -29,7 +32,7 @@ export function startHookServer({ port = +process.env.ECHO_HOOK_PORT || 8791, se
       if (size > MAX_BODY) return;
       res.writeHead(200); res.end(); // D-16: answer first, parse after
       queueMicrotask(() => {
-        try { onHook(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch {}
+        try { (ext ? onExtHook : onHook)(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch {}
       });
     });
   });

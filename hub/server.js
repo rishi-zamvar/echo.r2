@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import { Sessions, resolveClaude } from './sessions.js';
 import { discoverExternal, liveSessionIds } from './transcript.js';
 import { startHookServer, writeHooksFile } from './hooks.js';
-import { makeWhois, tailnetIp, loadConfig, saveConfig, defaultTailscale, Pairing, Devices } from './auth.js';
+import { makeWhois, tailnetIp, loadConfig, saveConfig, defaultTailscale, Pairing, Devices, inRoots, listRoots } from './auth.js';
 import { execFileSync } from 'node:child_process';
 
 const version = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
@@ -42,7 +42,9 @@ export async function startHub({
   const hooksFile = path.join(dataDir, 'hub-hooks.json');
   const projectsDir = path.join(claudeHome, 'projects');
   const sessions = new Sessions({ claudeCmd, epoch, dataDir, projectsDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret } });
-  const hookServer = await startHookServer({ port: hookPort, secret, onHook: (p) => sessions.hook(p) });
+  const hookServer = await startHookServer({ port: hookPort, secret, extSecret: config.hookSecret,
+    onHook: (p) => sessions.hook(p),
+    onExtHook: (p) => { if (p && typeof p.session_id === 'string' && sessions.ownedIds().has(p.session_id)) return; sessions.hook(p); } });
   const actualHookPort = hookServer.address().port;
   writeHooksFile(hooksFile, actualHookPort);
   const claude = await sessions.selfTest();
@@ -149,6 +151,7 @@ export async function startHub({
       if (req.method === 'GET' && url.pathname === '/sessions') {
         return json(res, 200, { epoch, sessions: sessions.list() });
       }
+      if (req.method === 'GET' && url.pathname === '/sessions/roots') return json(res, 200, { roots: listRoots(config.roots) });
       if (req.method === 'POST' && url.pathname === '/sessions') {
         let body;
         try { body = JSON.parse(await readBody(req)); } catch (e) {
@@ -158,6 +161,7 @@ export async function startHub({
         if (body.prompt !== undefined && (typeof body.prompt !== 'string' || body.prompt.length > 10000)) {
           return json(res, 400, { error: 'bad_prompt' });
         }
+        if (!inRoots(body.cwd, config.roots)) return json(res, 400, { error: 'bad_cwd' });
         if (!claude.ok) return json(res, 503, { error: 'claude_unavailable' });
         try {
           const s = sessions.start({ cwd: body.cwd, prompt: body.prompt });
@@ -254,7 +258,7 @@ export async function startHub({
     server.listen(port, host, resolve);
   });
   const actualPort = server.address().port;
-  console.log(`echo hub loopback 127.0.0.1:${actualPort}`);
+  console.log(`echo hub ${version} ${gitSha} loopback 127.0.0.1:${actualPort}`);
 
   // tailnet listener: bind to `tailscale ip -4`, retry with backoff until it appears
   let tailnetServer = null;
@@ -316,7 +320,22 @@ export async function startHub({
   };
 }
 
+export function openLog(file, { maxBytes = 5 * 1024 * 1024 } = {}) {
+  const rotate = () => { try { if (fs.statSync(file).size > maxBytes) fs.renameSync(file, file + '.1'); } catch {} };
+  rotate();
+  const timer = setInterval(rotate, 3600000);
+  timer.unref();
+  const log = (...args) => { try { fs.appendFileSync(file, `${new Date().toISOString()} ${args.join(' ')}\n`); } catch {} };
+  log.close = () => clearInterval(timer);
+  return log;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const dir = process.env.ECHO_DATA_DIR || path.join(os.homedir(), '.echo-hub');
+  fs.mkdirSync(dir, { recursive: true });
+  const log = openLog(path.join(dir, 'hub.log'));
+  console.log = console.error = log;
+  process.on('uncaughtException', (e) => { log(e.message, e.stack); process.exit(1); });
   startHub().catch((e) => {
     console.error(e.code === 'EADDRINUSE' ? `port ${process.env.ECHO_PORT || 8790} in use` : e.message);
     process.exit(1);

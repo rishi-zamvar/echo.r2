@@ -122,3 +122,30 @@ export class Devices {
   }
   list() { return this.items.map(({ id, name, createdAt, lastSeen }) => ({ id, name, createdAt, lastSeen })); }
 }
+
+// D-10: cwd must resolve (symlinks included) inside a configured root
+export function inRoots(cwd, roots) {
+  if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return false;
+  const fold = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  let real;
+  try { real = fold(fs.realpathSync(cwd)); } catch { return false; }
+  for (const root of roots ?? []) {
+    let rr;
+    try { rr = fold(fs.realpathSync(root)); } catch { continue; }
+    const rel = path.relative(rr, real);
+    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) return true;
+  }
+  return false;
+}
+
+// D-11: picker data
+export function listRoots(roots) {
+  return (roots ?? []).map((root) => {
+    let dirs = [];
+    try {
+      dirs = fs.readdirSync(root, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name).sort().slice(0, 200);
+    } catch {}
+    return { root, dirs };
+  });
+}
