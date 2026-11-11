@@ -25,7 +25,7 @@ High-risk Windows/ConPTY work goes first and is proven from a CLI client (no iOS
   4. Input from two clients to one session is serialized; input to an external session is refused.
 **Plans**: 6 plans
 Plans:
-- [ ] 01-01-PLAN.md — Walking skeleton: CLI starts real Claude in hub, attach/detach, since/epoch replay (SESS-03)
+- [x] 01-01-PLAN.md — Walking skeleton: CLI starts real Claude in hub, attach/detach, since/epoch replay (SESS-03)
 - [ ] 01-02-PLAN.md — Live state via http hooks (--settings) + transition() + cli list (SESS-02)
 - [ ] 01-03-PLAN.md — Send/interrupt/stop, serialized writers, tree kill, boot sweep (SESS-04, SESS-05)
 - [ ] 01-04-PLAN.md — Transcript chat events + external session discovery, read-only (SESS-02, SESS-05)
@@ -95,7 +95,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Hub Session Engine | 0/6 | Not started | - |
+| 1. Hub Session Engine | 1/6 | In Progress|  |
 | 2. Secure Hub & PC Install | 0/TBD | Not started | - |
 | 3. iOS App | 0/TBD | Not started | - |
 | 4. Push, Recovery & Release | 0/TBD | Not started | - |
