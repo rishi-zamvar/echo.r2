@@ -24,6 +24,18 @@ export function resolveClaude() {
   return [execFileSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).trim()];
 }
 
+const NEXT = {
+  data: { starting: 'running' },
+  input: { starting: 'running', running: 'running', waiting: 'running', done: 'running' },
+  stop: { starting: 'done', running: 'done', waiting: 'done' },
+  notification: { starting: 'waiting', running: 'waiting', done: 'waiting' },
+  exit: { starting: 'exited', running: 'exited', waiting: 'exited', done: 'exited' },
+  boot: { starting: 'stopped', running: 'stopped', waiting: 'stopped', done: 'stopped' },
+};
+// exited, stopped, external are absent from every row, so they never change
+export const transition = (state, signal) => NEXT[signal]?.[state] ?? state;
+
+const STOP_DEBOUNCE_MS = 1500;
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.floor(+n) || lo));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,7 +44,12 @@ export class Sessions {
   constructor({ claudeCmd, epoch, dataDir, extraArgs = () => [], extraEnv = {} }) {
     Object.assign(this, { claudeCmd, epoch, dataDir, extraArgs, extraEnv });
     this.file = path.join(dataDir, 'sessions.json');
-    this.prior = load(this.file, []); // plan 02 marks these stopped
+    this.prior = load(this.file, []);
+    let changed = false;
+    for (const p of this.prior) {
+      if (p.source === 'hub') { const n = transition(p.state, 'boot'); if (n !== p.state) { p.state = n; changed = true; } }
+    }
+    if (changed) save(this.file, this.prior); // plan 03 adds the PID sweep that kills leftovers
     if (process.platform !== 'win32') {
       try { // Pitfall 1: darwin prebuild ships spawn-helper 0644
         const dir = path.dirname(createRequire(import.meta.url).resolve('node-pty'));
@@ -82,15 +99,18 @@ export class Sessions {
       buf = '';
     };
     s.pty.onData((d) => {
-      if (s.state === 'starting') this.setState(s, 'running');
+      this.signal(s.id, 'data');
       buf += d;
       timer ??= setTimeout(flush, 25);
     });
     s.pty.onExit(() => {
       clearTimeout(timer);
+      clearTimeout(s.stopTimer);
       flush();
-      this.setState(s, 'exited');
+      this.signal(s.id, 'exit');
     });
+    const t = setTimeout(() => { if (s.state === 'starting') console.log(`starting timeout ${id.slice(0, 8)}`); }, 20000);
+    t.unref();
     return s;
   }
 
@@ -100,29 +120,61 @@ export class Sessions {
     this.#persist();
   }
 
+  signal(id, sig) {
+    const s = this.get(id);
+    if (!s) return;
+    const next = transition(s.state, sig);
+    if (next !== s.state) this.setState(s, next);
+  }
+
+  hook(p) {
+    if (!p || typeof p !== 'object' || typeof p.session_id !== 'string' || typeof p.hook_event_name !== 'string') return;
+    if (p.agent_id || p.hook_event_name === 'SubagentStop') return; // Pitfall 6
+    const id = p.session_id;
+    const s = this.get(id);
+    if (!s) {
+      if (!/^[0-9a-f-]{36}$/.test(id)) return;
+      this.#map.set(id, { id, cwd: typeof p.cwd === 'string' ? p.cwd : '', pid: 0, state: 'external', source: 'external',
+        label: 'Unknown', transcriptPath: p.transcript_path, startedAt: new Date().toISOString(), log: new EventLog(), pty: null });
+      return this.#persist();
+    }
+    if (p.hook_event_name === 'Stop') {
+      clearTimeout(s.stopTimer);
+      s.stopTimer = setTimeout(() => this.signal(id, 'stop'), STOP_DEBOUNCE_MS);
+    } else if (p.hook_event_name === 'Notification') {
+      s.lastMessage = p.message;
+      this.signal(id, 'notification');
+    }
+  }
+
   get(id) { return this.#map.get(id); }
 
   list() {
-    const live = [...this.#map.values()].map(({ id, cwd, pid, state, source, startedAt }) => ({ id, cwd, pid, state, source, startedAt }));
+    const live = [...this.#map.values()].map(({ id, cwd, pid, state, source, startedAt, label }) => ({ id, cwd, pid, state, source, startedAt, label }));
     const ids = new Set(live.map((s) => s.id));
     return [...this.prior.filter((p) => !ids.has(p.id)), ...live];
   }
 
   input(id, text) {
     const s = this.get(id);
-    if (!s || s.state === 'exited') return;
+    if (!s?.pty || s.state === 'exited') return;
+    clearTimeout(s.stopTimer);
+    this.signal(id, 'input');
     s.pty.write('\x1b[200~' + text + '\x1b[201~');
     setTimeout(() => { try { s.pty.write('\r'); } catch {} }, 80);
   }
 
   keys(id, data) {
     const s = this.get(id);
-    if (s && s.state !== 'exited') s.pty.write(data);
+    if (!s?.pty || s.state === 'exited') return;
+    clearTimeout(s.stopTimer);
+    this.signal(id, 'input');
+    s.pty.write(data);
   }
 
   resize(id, cols, rows) {
     const s = this.get(id);
-    if (!s || s.state === 'exited') return;
+    if (!s?.pty || s.state === 'exited') return;
     s.cols = clamp(cols, 20, 500);
     s.rows = clamp(rows, 5, 200);
     s.pty.resize(s.cols, s.rows);
@@ -130,7 +182,7 @@ export class Sessions {
 
   async nudge(id) {
     const s = this.get(id);
-    if (!s || s.state === 'exited') return;
+    if (!s?.pty || s.state === 'exited') return;
     const { cols, rows } = s;
     s.pty.resize(cols, rows + 1);
     await sleep(50);
@@ -138,6 +190,6 @@ export class Sessions {
   }
 
   killAll() {
-    for (const s of this.#map.values()) { try { s.pty.kill(); } catch {} }
+    for (const s of this.#map.values()) { clearTimeout(s.stopTimer); try { s.pty.kill(); } catch {} }
   }
 }

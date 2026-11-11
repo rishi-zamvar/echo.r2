@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Sessions, resolveClaude } from './sessions.js';
+import { startHookServer, writeHooksFile } from './hooks.js';
 
 const version = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 const MAX_BODY = 1 << 20;
@@ -15,11 +16,18 @@ export async function startHub({
   host = '127.0.0.1',
   claudeCmd = resolveClaude(),
   dataDir = process.env.ECHO_DATA_DIR || path.join(os.homedir(), '.echo-hub'),
+  hookPort = +process.env.ECHO_HOOK_PORT || 8791,
   killOnClose = false,
 } = {}) {
   if (host !== '127.0.0.1') throw new Error('hub binds to 127.0.0.1 only (Phase 1)'); // T-01-01
   const epoch = crypto.randomUUID();
-  const sessions = new Sessions({ claudeCmd, epoch, dataDir });
+  const secret = crypto.randomBytes(16).toString('hex'); // per boot, child env only (D-15)
+  fs.mkdirSync(dataDir, { recursive: true });
+  const hooksFile = path.join(dataDir, 'hub-hooks.json');
+  const sessions = new Sessions({ claudeCmd, epoch, dataDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ECHO_SECRET: secret } });
+  const hookServer = await startHookServer({ port: hookPort, secret, onHook: (p) => sessions.hook(p) });
+  const actualHookPort = hookServer.address().port;
+  writeHooksFile(hooksFile, actualHookPort);
   const claude = await sessions.selfTest();
   console.log(claude.ok ? `claude ok ${claude.version}` : 'claude FAIL');
 
@@ -130,12 +138,14 @@ export async function startHub({
   const actualPort = server.address().port;
 
   return {
-    epoch, port: actualPort, sessions, server,
+    epoch, port: actualPort, hookPort: actualHookPort, secret, sessions, server,
     close() {
       clearInterval(hb);
       for (const ws of wss.clients) ws.terminate();
       if (killOnClose) sessions.killAll();
       server.close();
+      hookServer.close();
+      hookServer.closeAllConnections?.();
       server.closeAllConnections?.();
     },
   };
