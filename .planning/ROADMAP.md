@@ -7,7 +7,7 @@ High-risk Windows/ConPTY work goes first and is proven from a CLI client (no iOS
 ## Phases
 
 - [ ] **Phase 1: Hub Session Engine** - Node hub on the PC runs Claude sessions in ConPTY, tracks live state, replays output; driven by a CLI client
-- [ ] **Phase 2: Secure Hub & PC Install** - Hub is tailnet-only, token-paired, auto-starts at login, one-command install/deploy
+- [ ] **Phase 2: Secure Hub & Install (Mac stand-in + PC)** - Hub is tailnet-only, token-paired, auto-starts at login on the Mac (launchd, live now) and the PC (Task Scheduler, verified when PC returns)
 - [ ] **Phase 3: iOS App** - Paired app lists sessions, starts them, shows chat and terminal, watches external sessions, reconnects cleanly
 - [ ] **Phase 4: Push, Recovery & Release** - APNs alerts with deep links, resume/take-over, TestFlight release
 
@@ -38,17 +38,17 @@ Plans:
   - Installed `claude --version` honors `type:"http"` hooks and a secret (fallback: command hook `node hook.js`); Stop/Notification/SubagentStop payloads
   - Record a transcript fixture on the PC for the parser test
 
-### Phase 2: Secure Hub & PC Install
-**Goal**: The hub is reachable only by Rishi's paired phone over Tailscale and keeps itself running on the PC with one install and one deploy command.
+### Phase 2: Secure Hub & Install (Mac stand-in + PC)
+**Goal**: The hub is reachable only by Rishi's paired phone over Tailscale and keeps itself running with one install and one deploy command. **PC is down ~1 month (from 2026-11-11): the Mac (`rishis-macbook-pro`, 100.125.215.102) is the real stand-in hub now (launchd); Windows install (Task Scheduler/firewall) is written now and verified when the PC returns.**
 **Mode:** mvp
 **Depends on**: Phase 1
 **Requirements**: HUB-01, HUB-02, HUB-03, HUB-04, AUTH-01, AUTH-03
 **Success Criteria** (what must be TRUE):
-  1. After a PC reboot and login, the hub is running with no manual step, and it restarts itself if killed.
+  1. After a Mac login (launchd LaunchAgent) — and later a PC reboot+login (Task Scheduler) — the hub is running with no manual step, and it restarts itself if killed.
   2. A request from outside the tailnet, or from a tailnet device without a valid token, is rejected (fail closed); the hub is not bound to 0.0.0.0.
   3. `hub pair` prints a single-use code that expires in 5 minutes and exchanges for a per-device token; `hub revoke` makes that device get 401.
   4. `/health` reports hub version, git SHA, protocol version, and uptime.
-  5. One install script sets up the scheduled task, firewall rule, and Claude hooks; one deploy script updates the hub from git.
+  5. One install script per OS (`install.sh` launchd on Mac; `install.ps1` scheduled task + firewall on PC) sets up autostart and Claude hooks; one deploy script updates the hub from git.
 **Plans**: TBD
 **On-PC spikes**:
   - `tailscale whois --json` fields for the phone (user-owned vs tagged); firewall reachability from the phone

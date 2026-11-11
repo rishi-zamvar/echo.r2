@@ -43,6 +43,7 @@ Progress: [███████░░░] 67%
 ### Decisions
 
 - PC is the hub; phone talks only to PC
+- 2026-11-11: PC down ~1 month → Mac is the real stand-in hub (launchd). Plans 01-05/01-06 (PC spikes + PC acceptance) PARKED until PC returns; Dispatch msg 505b22a279d5 queued to swe. Windows code paths written but unverified.
 - Plain `ws://` over Tailscale (no cert code); verify ATS on device in Phase 3
 - `type:"http"` loopback hooks, command-hook fallback (verify in Phase 1 spike)
 - Chunk-boundary replay ring; `@xterm/headless` only if spike shows corruption
@@ -54,7 +55,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- All Windows/ConPTY behavior is unverified from the Mac; Phase 1 spikes must run on the PC
+- All Windows/ConPTY behavior is unverified; PC offline (not in tailnet peer list) until ~mid-Dec 2026. Resume 01-05 Task 3 + 01-06 when back.
 - Auto-logon for unattended reboot is Rishi's decision
 - Pin phone whois login/node id; Tailscale ACL scoping
 

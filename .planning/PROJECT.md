@@ -66,6 +66,7 @@ From the phone, anywhere, Rishi can see what every Claude session on the home PC
 | One PTY session, two views (chat from transcript, terminal from PTY) | Flexibility without running two processes | — Pending |
 | External sessions watch-only; take over via `claude --resume` | Avoid two writers on one session | — Pending |
 | APNs via TestFlight build | Paid account available; reliable push | — Pending |
+| Mac is the real stand-in hub while PC is down (~1 month from 2026-11-11) | PC offline; hub code is cross-platform; app usable whenever Mac is online | — Pending |
 | Fresh rebuild, name echo.r2 | Old ZeeChat defunct; personal + discreet name | — Pending |
 
 ## Evolution
