@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
+import { spawn } from 'node:child_process';
 import { startHub } from './server.js';
 import { EventLog } from './eventlog.js';
 import { scrubEnv, transition } from './sessions.js';
@@ -208,5 +209,92 @@ test('boot marks stopped, spawn args', async () => {
     const r = await fetch(`http://127.0.0.1:${h.port}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) });
     const { id } = await r.json();
     await waitFor(() => h.sessions.get(id).log.since(0).events.some((e) => e.kind === 'term' && Buffer.from(e.data, 'base64').toString().includes(`READY session=${id}`)));
+  } finally { h.close(); }
+});
+
+// ---- plan 03: steer and stop ----
+const posix = { skip: process.platform === 'win32' };
+const termText = (id) => hub.sessions.get(id).log.since(0).events
+  .filter((e) => e.kind === 'term').map((e) => Buffer.from(e.data, 'base64').toString()).join('');
+const gone = (pid) => { try { process.kill(pid, 0); return false; } catch (e) { return e.code === 'ESRCH'; } };
+const errFrame = async (id, frame) => {
+  const ws = new WebSocket(`${wsBase}/sessions/${id}/stream`);
+  const f = frames(ws);
+  await open(ws);
+  ws.send(JSON.stringify(frame));
+  await sleep(300);
+  ws.close();
+  return f.find((x) => x.type === 'error');
+};
+
+test('interrupt reaches pty', async () => {
+  const id = await create();
+  await waitFor(() => st(id) === 'running');
+  const ws = new WebSocket(`${wsBase}/sessions/${id}/stream`);
+  await open(ws);
+  ws.send(JSON.stringify({ type: 'interrupt' }));
+  await waitFor(() => termText(id).includes('^C-RECEIVED'), 1000);
+  ws.close();
+});
+
+test('stop kills tree', posix, async () => {
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: tmp(), killOnClose: true, spawnEnv: { FAKE_GRANDCHILD: '1' } });
+  try {
+    const r = await fetch(`http://127.0.0.1:${h.port}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) });
+    const { id } = await r.json();
+    const s = h.sessions.get(id);
+    const text = () => s.log.since(0).events.filter((e) => e.kind === 'term').map((e) => Buffer.from(e.data, 'base64').toString()).join('');
+    await waitFor(() => /GRANDCHILD \d+/.test(text()));
+    const gpid = +text().match(/GRANDCHILD (\d+)/)[1];
+    const res = await fetch(`http://127.0.0.1:${h.port}/sessions/${id}/stop`, { method: 'POST' });
+    assert.equal(res.status, 200);
+    await waitFor(() => gone(s.pid) && gone(gpid), 3000);
+    assert.equal(s.state, 'exited');
+  } finally { h.close(); }
+});
+
+test('two writers serialized', async () => {
+  const id = await create();
+  await waitFor(() => st(id) === 'running');
+  const a = new WebSocket(`${wsBase}/sessions/${id}/stream`);
+  const b = new WebSocket(`${wsBase}/sessions/${id}/stream`);
+  await Promise.all([open(a), open(b)]);
+  a.send(JSON.stringify({ type: 'input', text: 'A'.repeat(2000) }));
+  b.send(JSON.stringify({ type: 'input', text: 'B'.repeat(2000) }));
+  const got = () => termText(id).split('\r\n').filter((l) => l.startsWith('IN:')).map((l) => JSON.parse(l.slice(3))).join('');
+  const pa = '\x1b[200~' + 'A'.repeat(2000) + '\x1b[201~\r';
+  const pb = '\x1b[200~' + 'B'.repeat(2000) + '\x1b[201~\r';
+  await waitFor(() => got().length >= pa.length + pb.length, 3000);
+  assert.ok([pa + pb, pb + pa].includes(got()));
+  a.close(); b.close();
+});
+
+test('external read-only', async () => {
+  const id = crypto.randomUUID();
+  await hook(hp(id, 'Stop'));
+  await waitFor(() => hub.sessions.get(id));
+  for (const f of [{ type: 'input', text: 'x' }, { type: 'keys', data: 'x' }, { type: 'interrupt' }]) {
+    assert.equal((await errFrame(id, f))?.code, 'read_only');
+  }
+  assert.equal((await fetch(`${base}/sessions/${id}/stop`, { method: 'POST' })).status, 409);
+});
+
+test('boot sweep kills leftover', posix, async () => {
+  const dir = tmp();
+  const victim = spawn(process.execPath, [fake], { detached: true, stdio: 'ignore' });
+  const bystander = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  after(() => { for (const c of [victim, bystander]) try { process.kill(c.pid, 'SIGKILL'); } catch {} });
+  await sleep(300);
+  fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify([
+    { id: 'v'.repeat(8), pid: victim.pid, state: 'running', source: 'hub' },
+    { id: 'b'.repeat(8), pid: bystander.pid, state: 'running', source: 'hub' },
+  ]));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true });
+  try {
+    await waitFor(() => gone(victim.pid), 3000);
+    const l = h.sessions.list();
+    assert.equal(l.find((s) => s.id === 'v'.repeat(8)).state, 'stopped');
+    assert.equal(l.find((s) => s.id === 'b'.repeat(8)).state, 'stopped');
+    assert.equal(gone(bystander.pid), false);
   } finally { h.close(); }
 });
