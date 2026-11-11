@@ -512,3 +512,126 @@ test('tailnet retry bind', async () => {
     assert.equal((await fetch(`http://127.0.0.1:${p}/health`)).status, 200);
   } finally { h2.close(); process.env.FAKE_TS_STATE = prev; }
 });
+
+// ---- phase 2 plan 02: pairing, bearer tokens, revoke ----
+import { Pairing } from './auth.js';
+const jpost = (url, body, headers = {}) => fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+const mintCode = async (b = base, name) => (await (await jpost(`${b}/admin/pair-code`, name ? { name } : {})).json()).code;
+async function pairDevice(deviceName = 'x', b = base, t = tb) {
+  const code = await mintCode(b);
+  const r = await jpost(`${t}/pair`, { code, deviceName });
+  assert.equal(r.status, 201);
+  return r.json();
+}
+const bearer = (token) => ({ authorization: `Bearer ${token}` });
+const wsOutcome = (url, headers) => new Promise((res) => {
+  const ws = new WebSocket(url, { headers });
+  ws.on('open', () => res({ ws, outcome: 'open' }));
+  ws.on('unexpected-response', (_q, m) => res({ ws, outcome: m.statusCode }));
+  ws.on('error', () => res({ ws, outcome: 'error' }));
+});
+
+test('pair happy path', async () => {
+  const r = await jpost(`${base}/admin/pair-code`, { name: 'test-phone' });
+  assert.equal(r.status, 200);
+  const { code, expiresIn } = await r.json();
+  assert.match(code, /^[0-9A-HJKMNP-TV-Z]{8}$/);
+  assert.equal(expiresIn, 300);
+  const typed = (code.slice(0, 4) + '-' + code.slice(4)).toLowerCase();
+  const p = await jpost(`${tb}/pair`, { code: typed, deviceName: 'x' });
+  assert.equal(p.status, 201);
+  const j = await p.json();
+  assert.ok(j.token && j.deviceId);
+  const again = await jpost(`${tb}/pair`, { code, deviceName: 'x' });
+  assert.equal(again.status, 403);
+  assert.deepEqual(await again.json(), { error: 'bad_code' });
+});
+
+test('bearer required', async () => {
+  const { token, deviceId } = await pairDevice();
+  assert.ok(deviceId);
+  assert.equal((await fetch(`${tb}/sessions`, { headers: bearer(token) })).status, 200);
+  const none = await fetch(`${tb}/sessions`);
+  assert.equal(none.status, 401);
+  assert.deepEqual(await none.json(), { error: 'unauthorized' });
+  assert.equal((await fetch(`${tb}/sessions`, { headers: bearer('nope') })).status, 401);
+  assert.equal((await fetch(`${tb}/sessions?token=${token}`)).status, 401);
+  const id = await create();
+  const wsUrl = `${tb.replace('http', 'ws')}/sessions/${id}/stream`;
+  const ok = await wsOutcome(wsUrl, bearer(token));
+  assert.equal(ok.outcome, 'open');
+  const hello = await new Promise((res) => ok.ws.on('message', (m) => res(JSON.parse(m.toString()))));
+  assert.equal(hello.type, 'hello');
+  ok.ws.close();
+  assert.equal((await wsOutcome(wsUrl, {})).outcome, 401);
+});
+
+test('pair limits', async () => {
+  let code = await mintCode();
+  for (let i = 0; i < 5; i++) {
+    const wrong = code[0] === '2' ? '3' + code.slice(1) : '2' + code.slice(1);
+    assert.equal((await jpost(`${tb}/pair`, { code: wrong })).status, 403);
+  }
+  assert.equal((await jpost(`${tb}/pair`, { code })).status, 403);
+  const old = await mintCode();
+  const fresh = await mintCode();
+  assert.equal((await jpost(`${tb}/pair`, { code: old })).status, old === fresh ? 201 : 403);
+  const p = new Pairing({ ttlMs: 50 });
+  const c = p.create('n').code;
+  await sleep(80);
+  assert.equal(p.redeem(c), null);
+});
+
+test('devices file', posix, async () => {
+  const { token } = await pairDevice();
+  const f = path.join(hubDir, 'devices.json');
+  const txt = fs.readFileSync(f, 'utf8');
+  assert.ok(!txt.includes(token));
+  assert.match(txt, /"hash": ?"[0-9a-f]{64}"/);
+  assert.equal(fs.statSync(f).mode & 0o777, 0o600);
+});
+
+test('revoke closes access', async () => {
+  const { token, deviceId } = await pairDevice('revokee');
+  const list = await (await fetch(`${base}/admin/devices`)).json();
+  const d = list.devices.find((x) => x.id === deviceId);
+  assert.ok(d && !('hash' in d));
+  const id = await create();
+  const { ws, outcome } = await wsOutcome(`${tb.replace('http', 'ws')}/sessions/${id}/stream`, bearer(token));
+  assert.equal(outcome, 'open');
+  const closed = new Promise((res) => ws.on('close', (code) => res(code)));
+  const r = await jpost(`${base}/admin/revoke`, { id: deviceId });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).revoked, [deviceId]);
+  assert.equal(await closed, 4401);
+  assert.equal((await fetch(`${tb}/sessions`, { headers: bearer(token) })).status, 401);
+  assert.equal((await jpost(`${base}/admin/revoke`, { id: deviceId })).status, 404);
+});
+
+test('admin 404 on tailnet', async () => {
+  const { token, deviceId } = await pairDevice();
+  const h = bearer(token);
+  assert.equal((await jpost(`${tb}/admin/pair-code`, {}, h)).status, 404);
+  assert.equal((await fetch(`${tb}/admin/devices`, { headers: h })).status, 404);
+  assert.equal((await jpost(`${tb}/admin/revoke`, { id: deviceId }, h)).status, 404);
+  assert.equal((await fetch(`${tb}/sessions`, { headers: h })).status, 200);
+});
+
+test('owner captured at first pair', async () => {
+  const st = path.join(tmp(), 'ts.json');
+  const as = (login) => fs.writeFileSync(st, JSON.stringify({ ip: '127.0.0.1', whois: { UserProfile: { LoginName: login } }, exit: 0 }));
+  as('first@example.com');
+  const prev = process.env.FAKE_TS_STATE;
+  process.env.FAKE_TS_STATE = st;
+  const dir = tmp();
+  const h2 = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: dir, hookPort: 0,
+    tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, whoisTtlMs: 0 });
+  try {
+    const b2 = `http://127.0.0.1:${h2.port}`;
+    const t2 = `http://127.0.0.1:${await h2.tailnetReady}`;
+    await pairDevice('p', b2, t2);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')).owner, 'first@example.com');
+    as('other@example.com');
+    assert.equal((await fetch(`${t2}/health`)).status, 403);
+  } finally { h2.close(); process.env.FAKE_TS_STATE = prev; }
+});
