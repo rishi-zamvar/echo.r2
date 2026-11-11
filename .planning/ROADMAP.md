@@ -49,7 +49,15 @@ Plans:
   3. `hub pair` prints a single-use code that expires in 5 minutes and exchanges for a per-device token; `hub revoke` makes that device get 401.
   4. `/health` reports hub version, git SHA, protocol version, and uptime.
   5. One install script per OS (`install.sh` launchd on Mac; `install.ps1` scheduled task + firewall on PC) sets up autostart and Claude hooks; one deploy script updates the hub from git.
-**Plans**: TBD
+**Plans**: 7 plans
+Plans:
+- [ ] 02-01-PLAN.md — Tailnet listener (retry-bind) + whois fail-closed + /health gitSha (HUB-02, HUB-03)
+- [ ] 02-02-PLAN.md — Pair code → bearer token, devices/revoke, cli pair/devices/revoke (AUTH-01, AUTH-03, HUB-02)
+- [ ] 02-03-PLAN.md — cwd allowlist + /sessions/roots, /hook/ext global-hook receiver, rotating hub.log (HUB-02, HUB-04)
+- [ ] 02-04-PLAN.md — Mac install.sh/uninstall.sh/deploy.sh (launchd), hooks-merge.js, RUNBOOK (HUB-01, HUB-04)
+- [ ] 02-05-PLAN.md — Windows install.ps1/uninstall.ps1/deploy.ps1, written UNVERIFIED (HUB-01, HUB-04)
+- [ ] 02-06-PLAN.md — Mac live install + checks L1-L8, key-expiry checkpoint (all reqs; human-verify)
+- [ ] 02-07-PLAN.md — PARKED: PC verification via swe when zee-cloud returns
 **On-PC spikes**:
   - `tailscale whois --json` fields for the phone (user-owned vs tagged); firewall reachability from the phone
   - Bind-before-Tailscale timing (retry-bind); hidden-launch behavior under Task Scheduler
@@ -96,6 +104,6 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Hub Session Engine | 4/6 | In Progress|  |
-| 2. Secure Hub & PC Install | 0/TBD | Not started | - |
+| 2. Secure Hub & PC Install | 0/7 | Not started | - |
 | 3. iOS App | 0/TBD | Not started | - |
 | 4. Push, Recovery & Release | 0/TBD | Not started | - |

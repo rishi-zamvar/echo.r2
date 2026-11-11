@@ -271,10 +271,13 @@ Use `set -e` and the same `--short=7` in server.js so the comparison is stable.
 | A6 | Windows cmdlet parameter names/behaviors, hidden-window approach | Windows | PC checkpoint finds fixes; parked anyway |
 | A7 | Claude hooks hot-reload from settings.json watcher | Hooks | Existing sessions need restart to report; docs say "normally" picks up |
 
-## Open Questions
+## Open Questions (RESOLVED)
 1. **Repo is not a git repository** (`echo.r2` has no `.git`). D-17 deploy and `gitSha` need one. Recommendation: Wave 0 task `git init` + commit (user's call on a remote); deploy.sh errors clearly if `git rev-parse` fails. `gitSha` falls back to `unknown` per D-12 so nothing else blocks.
+   RESOLVED: the repo IS a git checkout (origin rishi-zamvar/echo.r2, private) per D-21 and verified at planning (`git rev-parse --short HEAD` works). No git init task; deploy.sh still fails clearly with `not a git checkout` as a guard.
 2. **Should `Notification` global hook also be restricted by matcher?** Default (no matcher) fires for all notification types; consistent with hub-owned file. Keep.
+   RESOLVED: no matcher (all notification types), same as the hub-owned hooks file. Related: the optional `X-Echo-Token` header fallback for URLSessionWebSocketTask is deferred to the Phase 3 on-device smoke test; D-08 (Authorization: Bearer only) stands for Phase 2.
 3. **Does `resolveClaude()` honor PATH at launchd time?** Planner reads `sessions.js resolveClaude`; if it only checks fixed locations, fine; if PATH-based, the plist PATH must include `~/.local/bin`.
+   RESOLVED: resolveClaude() on darwin is PATH-based (`sh -c 'command -v claude'`), so install.sh puts the resolved claude dir (dirname of `command -v claude`, here ~/.local/bin) in the plist EnvironmentVariables.PATH per D-21; 02-06 L5 proves it live.
 
 ## Environment Availability
 
@@ -312,7 +315,9 @@ Use `set -e` and the same `--short=7` in server.js so the comparison is stable.
 | AUTH-01/D-08 | missing/invalid bearer -> 401 JSON; WS upgrade without bearer -> 401 before handshake; token in query ignored | integ | `--test-name-pattern bearer` | Wave 0 |
 | AUTH-03 | revoke -> next request 401; open WS for that device closed | integ | `--test-name-pattern revoke` | Wave 0 |
 | D-10/11 | cwd outside roots, symlink escape, prefix sibling -> 400 bad_cwd; `/sessions/roots` lists subdirs | integ | `--test-name-pattern cwd` | Wave 0 |
-| D-01 | `/admin/*` on tailnet listener -> 404/403 | integ | `--test-name-pattern admin` | Wave 0 |
+| D-01 | `/admin/*` on tailnet listener with a VALID token -> exactly 404 | integ | `--test-name-pattern admin` | Wave 0 |
+| D-01 | loopback rejects foreign Host / any Origin -> 403 (DNS rebinding) | integ | `--test-name-pattern loopback` | Wave 0 |
+| D-05 | whois 'tagged-devices' / missing UserProfile -> rejected even without owner | unit | `--test-name-pattern tagged` | Wave 0 |
 | D-16 | `hooks-merge.js`: idempotent, preserves other hooks, backup made, unmerge removes only marked, run against tmp settings file | unit | `--test-name-pattern merge` | Wave 0 |
 | D-16 | `/hook/ext/<secret>` bad secret 404/403; owned id ignored; unknown -> external | integ | `--test-name-pattern ext hook` | Wave 0 |
 | D-18 | log rotates at threshold (inject small max), no token in log | unit | `--test-name-pattern log` | Wave 0 |
