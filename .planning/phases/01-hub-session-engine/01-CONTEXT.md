@@ -41,7 +41,8 @@ Requirements: SESS-02, SESS-03, SESS-04, SESS-05. Hub-side endpoints that later 
 
 ### Hooks
 - **D-14:** Use Claude Code `type: "http"` hooks POSTing to a **separate loopback listener** `127.0.0.1:<hookPort>` with a shared secret (header if supported, else secret path segment). Fallback if the PC spike shows http hooks unsupported: command hook `node <abs>/hook.js` (exit 0, 2 s timeout).
-- **D-15:** Hook installer merges into `~/.claude/settings.json` (backup first, marker comment/key for idempotent uninstall), never overwrites. Hooks fire for all PC sessions: unknown `session_id` → `external` record.
+- **D-15 (revised after research):** Hub-owned sessions get hooks per process via `claude --settings <hub-hooks.json>` (http hooks, `X-Echo-Secret` header from child env via `allowedEnvVars`) — verified live on Mac. Global `~/.claude/settings.json` merge (backup first, marker key, idempotent uninstall, never overwrite) is only for external-session alerts and is deferred to Phase 2's installer. Unknown `session_id` on the hook listener → `external` record.
+- **D-15a:** Scrub all `CLAUDE*` env vars from the child env (inheriting `CLAUDE_CODE_CHILD_SESSION` disables transcripts). Pass the first prompt as the positional `[prompt]` arg, never as pasted input (folder-trust dialog defaults to "exit").
 - **D-16:** Hook receiver returns 200 immediately, processes async; validates payload shape.
 
 ### Process control & writers
