@@ -95,12 +95,42 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| SESS-02 | Phase 1 | Pending |
+| SESS-03 | Phase 1 | Pending |
+| SESS-04 | Phase 1 | Pending |
+| SESS-05 | Phase 1 | Pending |
+| HUB-01 | Phase 2 | Pending |
+| HUB-02 | Phase 2 | Pending |
+| HUB-03 | Phase 2 | Pending |
+| HUB-04 | Phase 2 | Pending |
+| AUTH-01 | Phase 2 | Pending |
+| AUTH-03 | Phase 2 | Pending |
+| APP-01 | Phase 3 | Pending |
+| AUTH-02 | Phase 3 | Pending |
+| SESS-01 | Phase 3 | Pending |
+| CHAT-01 | Phase 3 | Pending |
+| CHAT-02 | Phase 3 | Pending |
+| CHAT-03 | Phase 3 | Pending |
+| TERM-01 | Phase 3 | Pending |
+| TERM-02 | Phase 3 | Pending |
+| TERM-03 | Phase 3 | Pending |
+| EXT-01 | Phase 3 | Pending |
+| CONN-01 | Phase 3 | Pending |
+| CONN-02 | Phase 3 | Pending |
+| NOTF-01 | Phase 4 | Pending |
+| NOTF-02 | Phase 4 | Pending |
+| NOTF-03 | Phase 4 | Pending |
+| NOTF-04 | Phase 4 | Pending |
+| NOTF-05 | Phase 4 | Pending |
+| SESS-06 | Phase 4 | Pending |
+| EXT-02 | Phase 4 | Pending |
+| APP-02 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 30 total
-- Mapped to phases: 0
-- Unmapped: 30 ⚠️
+- Mapped to phases: 30
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-11-11*
-*Last updated: 2026-11-11 after initialization*
+*Last updated: 2026-11-11 after roadmap creation*
