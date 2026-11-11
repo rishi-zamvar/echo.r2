@@ -8,6 +8,8 @@ import { WebSocketServer } from 'ws';
 import { Sessions, resolveClaude } from './sessions.js';
 import { discoverExternal, liveSessionIds } from './transcript.js';
 import { startHookServer, writeHooksFile } from './hooks.js';
+import { makeWhois, tailnetIp, loadConfig, defaultTailscale } from './auth.js';
+import { execFileSync } from 'node:child_process';
 
 const version = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 const MAX_BODY = 1 << 20;
@@ -21,11 +23,20 @@ export async function startHub({
   killOnClose = false,
   spawnEnv = {},
   claudeHome = process.env.ECHO_CLAUDE_HOME || path.join(os.homedir(), '.claude'),
+  tailscale = defaultTailscale(),
+  tailnetPort = port,
+  retryMs = 1000,
+  allowLoopbackTailnet = false, // test-only
+  whoisTtlMs = 60000,
 } = {}) {
-  if (host !== '127.0.0.1') throw new Error('hub binds to 127.0.0.1 only (Phase 1)'); // T-01-01
+  if (host !== '127.0.0.1') throw new Error('loopback listener binds 127.0.0.1 only');
   const epoch = crypto.randomUUID();
   const secret = crypto.randomBytes(16).toString('hex'); // per boot, child env only (D-15)
   fs.mkdirSync(dataDir, { recursive: true });
+  const config = loadConfig(dataDir);
+  const whois = makeWhois({ cmd: tailscale, ttlMs: whoisTtlMs });
+  let gitSha = 'unknown';
+  try { gitSha = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: import.meta.dirname, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'unknown'; } catch {}
   const hooksFile = path.join(dataDir, 'hub-hooks.json');
   const projectsDir = path.join(claudeHome, 'projects');
   const sessions = new Sessions({ claudeCmd, epoch, dataDir, projectsDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret } });
@@ -54,12 +65,30 @@ export async function startHub({
     });
   }
 
-  const server = http.createServer(async (req, res) => {
+  const health = () => ({ ok: true, protocol: 1, version, gitSha, uptime: process.uptime(), os: process.platform, hubName: os.hostname(), epoch, claude });
+  const deny = (sock, line) => { sock.end(`HTTP/1.1 ${line}\r\nConnection: close\r\n\r\n`); };
+
+  // returns true if request may proceed to loopback routing; otherwise has responded
+  const loopbackOk = (req) => {
+    const p = server.address()?.port;
+    return !req.headers.origin && (req.headers.host === `127.0.0.1:${p}` || req.headers.host === `localhost:${p}`);
+  };
+  // returns true if tailnet peer is the owner (or no owner pinned yet)
+  const tailnetOk = async (req) => {
+    const login = await whois(req.socket.remoteAddress);
+    return !!login && (!config.owner || login === config.owner);
+  };
+
+  const makeHandler = ({ tailnet }) => async (req, res) => {
     try {
-      const url = new URL(req.url, 'http://x');
-      if (req.method === 'GET' && url.pathname === '/health') {
-        return json(res, 200, { ok: true, protocol: 1, version, epoch, uptime: process.uptime(), claude });
+      if (tailnet) {
+        if (!(await tailnetOk(req))) return json(res, 403, { error: 'forbidden' });
+        if (req.method === 'GET' && new URL(req.url, 'http://x').pathname === '/health') return json(res, 200, health());
+        return json(res, 401, { error: 'unauthorized' }); // bearer auth arrives in plan 02
       }
+      if (!loopbackOk(req)) return json(res, 403, { error: 'forbidden' });
+      const url = new URL(req.url, 'http://x');
+      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, health());
       if (req.method === 'GET' && url.pathname === '/sessions') {
         return json(res, 200, { epoch, sessions: sessions.list() });
       }
@@ -91,15 +120,23 @@ export async function startHub({
     } catch {
       if (!res.headersSent) json(res, 500, { error: 'internal' });
     }
-  });
+  };
+  const server = http.createServer(makeHandler({ tailnet: false }));
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
-  server.on('upgrade', (req, sock, head) => {
+  const makeUpgrade = ({ tailnet }) => async (req, sock, head) => {
+    sock.on('error', () => {});
+    if (tailnet) {
+      if (!(await tailnetOk(req))) return deny(sock, '403 Forbidden');
+      return deny(sock, '401 Unauthorized'); // bearer auth arrives in plan 02
+    }
+    if (!loopbackOk(req)) return deny(sock, '403 Forbidden');
     const u = new URL(req.url, 'http://x');
     const m = u.pathname.match(/^\/sessions\/([0-9a-f-]{36})\/stream$/);
     if (!m) return sock.destroy();
     wss.handleUpgrade(req, sock, head, (ws) => attach(ws, m[1], u.searchParams));
-  });
+  };
+  server.on('upgrade', makeUpgrade({ tailnet: false }));
 
   function attach(ws, id, q) {
     const s = sessions.get(id);
@@ -157,10 +194,55 @@ export async function startHub({
     server.listen(port, host, resolve);
   });
   const actualPort = server.address().port;
+  console.log(`echo hub loopback 127.0.0.1:${actualPort}`);
+
+  // tailnet listener: bind to `tailscale ip -4`, retry with backoff until it appears
+  let tailnetServer = null;
+  let closing = false;
+  let resolveReady;
+  const tailnetReady = new Promise((r) => { resolveReady = r; });
+  (async () => {
+    let delay = retryMs;
+    let lastState = '';
+    while (!closing) {
+      const ip = await tailnetIp(tailscale, { allowLoopback: allowLoopbackTailnet });
+      if (ip && !closing) {
+        const t = http.createServer(makeHandler({ tailnet: true }));
+        t.on('upgrade', makeUpgrade({ tailnet: true }));
+        const ok = await new Promise((resolve) => {
+          t.once('error', () => resolve(false));
+          t.listen(tailnetPort, ip, () => resolve(true));
+        });
+        if (ok) {
+          tailnetServer = t;
+          const gone = new Promise((resolve) => { t.once('error', resolve); t.once('close', resolve); });
+          if (lastState !== 'up') console.log(`tailnet listening ${ip}:${t.address().port}`);
+          lastState = 'up';
+          resolveReady(t.address().port);
+          delay = retryMs;
+          await gone;
+          tailnetServer = null;
+          if (closing) break;
+          console.log('tailnet listener lost');
+          lastState = '';
+          continue;
+        }
+        t.close();
+      }
+      if (lastState !== 'waiting') console.log('tailnet waiting');
+      lastState = 'waiting';
+      await new Promise((r) => setTimeout(r, delay));
+      delay = Math.min(delay * 2, 30000);
+    }
+  })();
 
   return {
-    epoch, port: actualPort, hookPort: actualHookPort, secret, sessions, server,
+    epoch, port: actualPort, hookPort: actualHookPort, secret, sessions, server, config, tailnetReady,
+    get tailnetServer() { return tailnetServer; },
     close() {
+      closing = true;
+      tailnetServer?.close();
+      tailnetServer?.closeAllConnections?.();
       clearInterval(hb);
       clearInterval(scanTimer);
       sessions.close();
@@ -175,7 +257,7 @@ export async function startHub({
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  startHub().then((h) => console.log(`echo hub listening 127.0.0.1:${h.port}`)).catch((e) => {
+  startHub().catch((e) => {
     console.error(e.code === 'EADDRINUSE' ? `port ${process.env.ECHO_PORT || 8790} in use` : e.message);
     process.exit(1);
   });

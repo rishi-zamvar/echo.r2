@@ -35,7 +35,7 @@ process.env.FAKE_TS_STATE = tsState;
 const hubDir = tmp();
 fs.writeFileSync(path.join(hubDir, 'config.json'), JSON.stringify({ owner: 'owner@example.com' }));
 const hub = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: hubDir, killOnClose: true, hookPort: 0,
-  tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true });
+  tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, whoisTtlMs: 0 });
 const tb = `http://127.0.0.1:${await hub.tailnetReady}`;
 const base = `http://127.0.0.1:${hub.port}`;
 const wsBase = `ws://127.0.0.1:${hub.port}`;
