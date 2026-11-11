@@ -13,7 +13,7 @@ async function api(method, p, body) {
 }
 
 function usage() {
-  console.error('usage: cli.js list | new <cwd> [prompt...] | attach <id> [--since n] [--for s]');
+  console.error('usage: cli.js list | new <cwd> [prompt...] | attach <id> [--since n] [--for s] | send <id> <text...> | interrupt <id> | stop <id>');
   process.exit(2);
 }
 
@@ -76,4 +76,21 @@ if (cmd === 'list') {
   ws.on('close', detach);
   ws.on('error', (e) => { console.error(e.message); process.exit(1); });
   if (forSec) setTimeout(detach, +forSec * 1000);
+} else if (cmd === 'send' || cmd === 'interrupt') {
+  if (!args[0] || (cmd === 'send' && !args[1])) usage();
+  const id = await resolveId(args[0]);
+  const frame = cmd === 'send' ? { type: 'input', text: args.slice(1).join(' ') } : { type: 'interrupt' };
+  // no since= param: replay is skipped only by ignoring it; we just watch for an error frame
+  const ws = new WebSocket(`ws://${base}/sessions/${id}/stream?since=${Number.MAX_SAFE_INTEGER}&epoch=${(await api('GET', '/sessions')).epoch}`);
+  ws.on('error', (e) => { console.error(e.message); process.exit(1); });
+  ws.on('message', (m) => {
+    const f = JSON.parse(m.toString());
+    if (f.type === 'error') { console.error(f.code); process.exit(1); }
+  });
+  ws.on('open', () => ws.send(JSON.stringify(frame), () => setTimeout(() => process.exit(0), 300)));
+} else if (cmd === 'stop') {
+  if (!args[0]) usage();
+  const id = await resolveId(args[0]);
+  await api('POST', `/sessions/${id}/stop`);
+  console.log(`stopped ${id.slice(0, 8)}`);
 } else usage();
