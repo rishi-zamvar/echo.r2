@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Roadmap created
-last_updated: "2026-11-11T20:46:41.169Z"
+last_updated: "2026-11-11T20:46:44.161Z"
 last_activity: 2026-11-11
 progress:
   total_phases: 4
@@ -46,6 +46,7 @@ Progress: [██░░░░░░░░] 17%
 - Plain `ws://` over Tailscale (no cert code); verify ATS on device in Phase 3
 - `type:"http"` loopback hooks, command-hook fallback (verify in Phase 1 spike)
 - Chunk-boundary replay ring; `@xterm/headless` only if spike shows corruption
+- [Phase 01]: spawn-helper chmod in Sessions constructor; positional prompt auto-submits; untrusted cwd shows trust dialog
 
 ### Pending Todos
 
