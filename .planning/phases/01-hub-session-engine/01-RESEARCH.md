@@ -329,7 +329,9 @@ Unit-test `sessions.js` with a fake "claude": a tiny `node -e` script spawned th
 | A7 | slopcheck-unavailable packages are fine (locked by D-04) | Audit | Negligible |
 | A8 | Tools listed in `dir` of `[prompt]` positional arg starts the session submitting the prompt | Pitfall 3 | Fall back to paste after Stop/idle; verify Mac smoke (not run here) |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+Resolution: Q1 → verified by 01-01 Task 4 Mac smoke; Q2 → adopted as CONTEXT D-15 (revised); Q3 → not relevant to Phase 1. Command-hook fallback (D-14) and interrupt→state behavior are routed via spike results and `/gsd:plan-phase 1 --gaps` if the PC shows divergence.
 
 1. **Does `[prompt]` positional start the TUI with the prompt auto-submitted?** Not tested here (cost-free to test on Mac smoke). Recommendation: plan a Mac smoke task; fallback is paste after transcript file appears.
 2. **D-15 vs `--settings`:** needs planner/user acknowledgement that hub-owned sessions use `--settings` and global merge becomes optional (external sessions only). Recommend adopting; D-14's secret-via-header is satisfied by env interpolation.

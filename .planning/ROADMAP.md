@@ -23,7 +23,14 @@ High-risk Windows/ConPTY work goes first and is proven from a CLI client (no iOS
   2. The session list shows each session as running / waiting for you / done / exited / stopped / external, driven by hooks and PTY exit rather than screen scraping.
   3. Interrupt (Ctrl-C) reaches Claude, and Stop kills the whole process tree (no orphaned `claude` processes on the PC afterwards).
   4. Input from two clients to one session is serialized; input to an external session is refused.
-**Plans**: TBD
+**Plans**: 6 plans
+Plans:
+- [ ] 01-01-PLAN.md — Walking skeleton: CLI starts real Claude in hub, attach/detach, since/epoch replay (SESS-03)
+- [ ] 01-02-PLAN.md — Live state via http hooks (--settings) + transition() + cli list (SESS-02)
+- [ ] 01-03-PLAN.md — Send/interrupt/stop, serialized writers, tree kill, boot sweep (SESS-04, SESS-05)
+- [ ] 01-04-PLAN.md — Transcript chat events + external session discovery, read-only (SESS-02, SESS-05)
+- [ ] 01-05-PLAN.md — Push to private GitHub, PC spikes S1-S7 via Dispatch, 01-SPIKES.md (parallel with 01-02)
+- [ ] 01-06-PLAN.md — PC acceptance of success criteria 1-4 via Dispatch
 **On-PC spikes** (written findings before building on them):
   - node-pty prebuild for the pinned Node; `claude.exe` resolution under Task Scheduler
   - Claude TUI under ConPTY: Ctrl-C, arrows, UTF-8, resize, bracketed paste + `\r`; orphan check after tree kill; resize-nudge repaint vs `@xterm/headless`
@@ -88,7 +95,7 @@ High-risk Windows/ConPTY work goes first and is proven from a CLI client (no iOS
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Hub Session Engine | 0/TBD | Not started | - |
+| 1. Hub Session Engine | 0/6 | Not started | - |
 | 2. Secure Hub & PC Install | 0/TBD | Not started | - |
 | 3. iOS App | 0/TBD | Not started | - |
 | 4. Push, Recovery & Release | 0/TBD | Not started | - |
