@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import { startHub } from './server.js';
+import { makeWhois } from './auth.js';
 import { EventLog } from './eventlog.js';
 import { scrubEnv, transition } from './sessions.js';
 
@@ -24,7 +26,17 @@ function frames(ws) {
 }
 const open = (ws) => new Promise((res, rej) => { ws.on('open', res); ws.on('error', rej); });
 
-const hub = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: tmp(), killOnClose: true, hookPort: 0 });
+const fakeTs = path.join(import.meta.dirname, 'fixtures', 'fake-tailscale.mjs');
+const tsState = path.join(tmp(), 'ts.json');
+const OWNER = { UserProfile: { LoginName: 'owner@example.com' } };
+const setTs = (patch) => fs.writeFileSync(tsState, JSON.stringify({ ...(fs.existsSync(tsState) ? JSON.parse(fs.readFileSync(tsState, 'utf8')) : {}), ...patch }));
+setTs({ ip: '127.0.0.1', whois: OWNER, exit: 0 });
+process.env.FAKE_TS_STATE = tsState;
+const hubDir = tmp();
+fs.writeFileSync(path.join(hubDir, 'config.json'), JSON.stringify({ owner: 'owner@example.com' }));
+const hub = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: hubDir, killOnClose: true, hookPort: 0,
+  tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true });
+const tb = `http://127.0.0.1:${await hub.tailnetReady}`;
 const base = `http://127.0.0.1:${hub.port}`;
 const wsBase = `ws://127.0.0.1:${hub.port}`;
 after(() => hub.close());
@@ -399,4 +411,104 @@ test('hub session chat', async () => {
     await waitFor(() => h.sessions.get(id).log.since(0).events.some((e) => e.kind === 'chat' && e.text === "I'll list the files."), 4000);
     assert.ok(!h.sessions.list().some((s) => s.id === id && s.source === 'external'));
   } finally { h.close(); }
+});
+
+// ---- phase 2 plan 01: tailnet / whois / health ----
+const raw = (port, { method = 'GET', path: p = '/health', headers = {} } = {}) => new Promise((res, rej) => {
+  const r = http.request({ host: '127.0.0.1', port, method, path: p, headers }, (m) => {
+    let b = ''; m.on('data', (c) => { b += c; }); m.on('end', () => res({ status: m.statusCode, body: b }));
+  });
+  r.on('error', rej); r.end();
+});
+const tport = () => +new URL(tb).port;
+
+test('health fields', async () => {
+  for (const b of [base, tb]) {
+    const h = await (await fetch(`${b}/health`)).json();
+    assert.equal(h.ok, true); assert.equal(h.protocol, 1);
+    assert.equal(typeof h.version, 'string');
+    assert.match(h.gitSha, /^([0-9a-f]{7}|unknown)$/);
+    assert.equal(typeof h.uptime, 'number'); assert.equal(h.os, process.platform);
+    assert.equal(typeof h.hubName, 'string'); assert.ok(h.epoch); assert.ok(h.claude);
+  }
+});
+
+test('whois fail closed', async () => {
+  try {
+    for (const patch of [{ exit: 1 }, { exit: 0, whois: 'not json' }, { exit: 0, whois: { Node: {} } },
+      { exit: 0, whois: { UserProfile: { LoginName: 'intruder@example.com' } } }]) {
+      setTs({ exit: 0, whois: OWNER, ...patch });
+      assert.equal((await fetch(`${tb}/health`)).status, 403, JSON.stringify(patch));
+    }
+  } finally { setTs({ exit: 0, whois: OWNER }); }
+  assert.equal((await fetch(`${tb}/health`)).status, 200);
+});
+
+test('whois rejects tagged', async () => {
+  const w = makeWhois({ cmd: [process.execPath, fakeTs], ttlMs: 0 });
+  try {
+    for (const [who, want] of [[{ UserProfile: { LoginName: 'tagged-devices' }, Node: { Tags: ['tag:server'] } }, null],
+      [{ Node: {} }, null], [{ UserProfile: { LoginName: '' } }, null], [OWNER, 'owner@example.com']]) {
+      setTs({ whois: who });
+      assert.equal(await w('::ffff:100.64.0.1'), want);
+    }
+  } finally { setTs({ whois: OWNER }); }
+});
+
+test('tailnet requires token', async () => {
+  const r = await fetch(`${tb}/sessions`);
+  assert.equal(r.status, 401);
+  assert.deepEqual(await r.json(), { error: 'unauthorized' });
+  const ws = new WebSocket(`${tb.replace('http', 'ws')}/sessions/${crypto.randomUUID()}/stream`);
+  const outcome = await new Promise((res) => {
+    ws.on('open', () => res('open'));
+    ws.on('unexpected-response', (_q, m) => res(m.statusCode));
+    ws.on('error', () => res('error'));
+  });
+  assert.notEqual(outcome, 'open');
+});
+
+test('loopback rejects foreign host', async () => {
+  const bad = await raw(hub.port, { headers: { host: 'evil.example:80' } });
+  assert.equal(bad.status, 403); assert.deepEqual(JSON.parse(bad.body), { error: 'forbidden' });
+  assert.equal((await raw(hub.port, { headers: { host: `localhost:${hub.port}` } })).status, 200);
+});
+
+test('loopback rejects origin', async () => {
+  const o = { origin: 'http://evil.example' };
+  assert.equal((await raw(hub.port, { method: 'POST', path: '/sessions', headers: o })).status, 403);
+  const ws = new WebSocket(`${wsBase}/sessions/${crypto.randomUUID()}/stream`, { headers: o });
+  const outcome = await new Promise((res) => {
+    ws.on('open', () => res('open'));
+    ws.on('unexpected-response', (_q, m) => res(m.statusCode));
+    ws.on('error', () => res('error'));
+  });
+  assert.notEqual(outcome, 'open');
+});
+
+test('bind addresses', () => {
+  assert.equal(hub.server.address().address, '127.0.0.1');
+  assert.equal(hub.tailnetServer.address().address, '127.0.0.1'); // fake ip
+  for (const f of ['server.js', 'auth.js', 'hooks.js']) {
+    const src = fs.readFileSync(path.join(import.meta.dirname, f), 'utf8');
+    assert.ok(!src.includes('0.0.0.0'), f);
+    assert.ok(!/['"]::['"]/.test(src), f);
+  }
+});
+
+test('tailnet retry bind', async () => {
+  const st = path.join(tmp(), 'ts.json');
+  fs.writeFileSync(st, JSON.stringify({ ip: '', whois: OWNER, exit: 0 }));
+  const prev = process.env.FAKE_TS_STATE;
+  process.env.FAKE_TS_STATE = st;
+  const h2 = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: tmp(), hookPort: 0,
+    tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, retryMs: 20 });
+  try {
+    assert.equal((await fetch(`http://127.0.0.1:${h2.port}/health`)).status, 200);
+    assert.equal(h2.tailnetServer, null);
+    fs.writeFileSync(st, JSON.stringify({ ip: '127.0.0.1', whois: OWNER, exit: 0 }));
+    const p = await Promise.race([h2.tailnetReady, sleep(2000).then(() => { throw new Error('no bind'); })]);
+    // no owner configured on h2 yet; any valid non-tagged login is accepted
+    assert.equal((await fetch(`http://127.0.0.1:${p}/health`)).status, 200);
+  } finally { h2.close(); process.env.FAKE_TS_STATE = prev; }
 });
