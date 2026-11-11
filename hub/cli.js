@@ -26,7 +26,7 @@ async function resolveId(prefix) {
 
 if (cmd === 'list') {
   const { sessions } = await api('GET', '/sessions');
-  for (const s of sessions) console.log([s.id.slice(0, 8), s.state, s.source, s.cwd, s.title].filter(Boolean).join(' '));
+  for (const s of sessions) console.log([s.id.slice(0, 8), s.state, s.source, s.cwd, s.label ?? s.title].filter(Boolean).join(' '));
 } else if (cmd === 'new') {
   if (!args[0]) usage();
   const prompt = args.slice(1).join(' ') || undefined;
@@ -66,6 +66,7 @@ if (cmd === 'list') {
   });
   ws.on('message', (m) => {
     const f = JSON.parse(m.toString());
+    if (f.kind === 'state' && !process.stdout.isTTY) console.error(`[state] ${f.state}`);
     if (f.type === 'hello') epoch = f.epoch;
     else if (f.type === 'reset') process.stdout.write('\x1bc');
     else if (f.type === 'error') console.error(f.code);
