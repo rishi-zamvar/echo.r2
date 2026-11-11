@@ -117,7 +117,7 @@ Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'claude|ping' } | 
 ## Results template (reply with this filled in)
 
 ```
-## S1
+### S1
 Result:
 Raw evidence:
 Verdict: PASS|FAIL|DIVERGES
