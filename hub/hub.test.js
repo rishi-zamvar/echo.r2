@@ -728,3 +728,67 @@ test('no secrets in log', async () => {
   const text = out.join('\n');
   assert.ok(!text.includes(code) && !text.includes(token));
 });
+
+// ---- 02-04 installer tests (temp files only; never touch real ~/.claude or LaunchAgents) ----
+import { spawnSync } from 'node:child_process';
+const origSettings = () => ({
+  permissions: { allow: ['Bash(ls)'] }, model: 'opus', statusLine: { type: 'command', command: 'x' },
+  hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'a' }] }], PostToolUse: [{ hooks: [{ type: 'command', command: 'b' }] }], SessionStart: [{ hooks: [{ type: 'command', command: 'c' }] }] },
+});
+const URL1 = 'http://127.0.0.1:8791/hook/ext/abc123';
+
+test('hooks merge', async () => {
+  const { merge, unmerge } = await import('./install/hooks-merge.js');
+  const orig = origSettings();
+  const m = merge(origSettings(), URL1);
+  for (const ev of ['Stop', 'Notification']) {
+    assert.equal(m.hooks[ev].length, 1);
+    assert.deepEqual(m.hooks[ev][0].hooks, [{ type: 'http', url: URL1, timeout: 3 }]);
+  }
+  const { Stop, Notification, ...restHooks } = m.hooks;
+  assert.deepEqual({ ...m, hooks: restHooks }, orig);
+  assert.deepEqual(merge(structuredClone(m), URL1), m);
+  const withUser = origSettings();
+  withUser.hooks.Stop = [{ hooks: [{ type: 'command', command: 'mine' }] }];
+  const m2 = merge(withUser, URL1);
+  assert.equal(m2.hooks.Stop.length, 2);
+  assert.equal(m2.hooks.Stop[0].hooks[0].command, 'mine');
+  assert.deepEqual(unmerge(m), orig);
+  const u2 = unmerge(m2);
+  assert.deepEqual(u2.hooks.Stop, [{ hooks: [{ type: 'command', command: 'mine' }] }]);
+  assert.ok(!('Notification' in u2.hooks));
+});
+
+test('hooks merge cli', async () => {
+  const d = tmp(), data = path.join(d, 'data'), f = path.join(d, 'settings.json');
+  const bytes = JSON.stringify(origSettings(), null, 2);
+  fs.writeFileSync(f, bytes);
+  const env = { ...process.env, ECHO_DATA_DIR: data, ECHO_HOOK_PORT: '8791', ECHO_CLAUDE_HOME: d };
+  const script = path.join(import.meta.dirname, 'install', 'hooks-merge.js');
+  const run = (...a) => spawnSync(process.execPath, [script, ...a], { env, encoding: 'utf8' });
+  const r = run('merge', f);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.readFileSync(f + '.echo-bak', 'utf8'), bytes);
+  if (!posix.skip) assert.equal(fs.statSync(f).mode & 0o777, 0o600);
+  const secret = JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).hookSecret;
+  assert.ok(fs.readFileSync(f, 'utf8').includes(`/hook/ext/${secret}`));
+  assert.equal(run('merge', f).status, 0);
+  assert.equal(fs.readFileSync(f + '.echo-bak', 'utf8'), bytes);
+  assert.equal(run('unmerge', f).status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(f, 'utf8')), origSettings());
+  fs.writeFileSync(f, '{bad');
+  assert.notEqual(run('merge', f).status, 0);
+  assert.equal(fs.readFileSync(f, 'utf8'), '{bad');
+});
+
+test('plist dry run', { skip: process.platform !== 'darwin' }, () => {
+  const plist = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.rishizamvar.echo-hub.plist');
+  const before = fs.existsSync(plist);
+  const sh = path.join(import.meta.dirname, 'install', 'install.sh');
+  const r = spawnSync('sh', [sh, '--dry-run'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const lint = spawnSync('plutil', ['-lint', '-'], { input: r.stdout, encoding: 'utf8' });
+  assert.equal(lint.status, 0, lint.stdout + lint.stderr);
+  for (const s of ['com.rishizamvar.echo-hub', 'RunAtLoad', 'KeepAlive', 'ThrottleInterval', path.join(import.meta.dirname, 'server.js'), 'launchd.log']) assert.ok(r.stdout.includes(s), s);
+  assert.equal(fs.existsSync(plist), before);
+});
