@@ -22,7 +22,7 @@ Requirements: HUB-01, HUB-02, HUB-03, HUB-04, AUTH-01, AUTH-03. Hub-side of AUTH
 - **D-03:** Tailscale CLI path resolved per OS: macOS `/usr/local/bin/tailscale` else `/Applications/Tailscale.app/Contents/MacOS/Tailscale`; Windows `C:\Program Files\Tailscale\tailscale.exe`. Overridable via `ECHO_TAILSCALE`.
 
 ### Identity (whois)
-- **D-04:** On every tailnet request/WS upgrade: `execFile(tailscale, ['whois','--json', remoteIP])`, cache per IP 60 s. Allow only if `UserProfile.LoginName` equals configured `owner` (default from first successful pair, stored in `~/.echo-hub/config.json`; current tailnet login is `rishizamvar@`). Non-zero exit, parse error, or mismatch → 403. Fail closed.
+- **D-04:** On every tailnet request/WS upgrade: `execFile(tailscale, ['whois','--json', remoteIP])`, cache per IP 60 s. Allow only if `UserProfile.LoginName` equals configured `owner` (default = whois `UserProfile.LoginName` captured at first successful pair — full form e.g. `rishizamvar@icloud.com`, not the short `rishizamvar@` from `tailscale status` — stored in `~/.echo-hub/config.json`). Non-zero exit, parse error, or mismatch → 403. Fail closed.
 - **D-05:** Tagged-node edge case (no user profile) → reject; documented in RUNBOOK.
 
 ### Tokens & pairing
@@ -52,11 +52,13 @@ Requirements: HUB-01, HUB-02, HUB-03, HUB-04, AUTH-01, AUTH-03. Hub-side of AUTH
 - **D-17:** `hub/install/deploy.sh` (Mac) / `deploy.ps1` (PC): `git pull --ff-only` → `npm ci --omit=dev` in hub/ → restart (`launchctl kickstart -k gui/$UID/com.rishizamvar.echo-hub` / `schtasks /End` + `/Run`) → poll loopback `/health` until `gitSha` == new HEAD (30 s timeout) → print `deployed <sha>` or `deploy FAILED`.
 
 ### Logs & runbook
-- **D-18:** Log rotation in-process: when `hub.log` > 5 MB at startup or hourly, rename to `hub.log.1` (one generation). Never log tokens, codes after use, Authorization headers, or transcript content.
+- **D-18 (revised after research):** Hub writes its own `hub.log` (launchd stdout/stderr → separate `launchd.log`, so rotation-by-rename is safe). Log rotation in-process: when `hub.log` > 5 MB at startup or hourly, rename to `hub.log.1` (one generation). Never log tokens, codes after use, Authorization headers, or transcript content.
 - **D-19:** `hub/RUNBOOK.md`: install, pair, revoke, deploy, logs, Mac-sleep caveat, Tailscale key-expiry (disable for hub node), recommended Tailscale ACL (phone → hub:8790 only), PC-return checklist (resume 01-05/01-06 + Phase 2 PC checkpoint).
 
 ### File budget
 - **D-20:** New code goes in a new `hub/auth.js` (whois, tokens, pairing, devices) + edits to server.js/cli.js; scripts under `hub/install/`. Tests stay in `hub/hub.test.js` (whois stubbed via `ECHO_TAILSCALE` pointing to a fake script).
+
+#- **D-21 (research):** echo.r2 IS a git repo (origin rishi-zamvar/echo.r2, private) — deploy/gitSha work as specified. Whois: cache only successful results. `/admin/*` exists only on the loopback server instance (separate http.Server per listener). Global hooks set `timeout: 3`; `/hook/ext/<secret>` drops events for hub-owned session ids. Plist PATH must include the resolved claude dir (check `resolveClaude()`, e.g. `~/.local/bin`). Mac live check must create a session from the launchd-started hub in `~/Documents/Projects` (TCC risk).
 
 ### Claude's Discretion
 - Exact backoff numbers, code alphabet, JSON field names beyond those listed, plist label details.
