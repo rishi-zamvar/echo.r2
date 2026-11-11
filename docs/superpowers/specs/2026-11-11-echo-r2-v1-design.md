@@ -1,6 +1,6 @@
-# ZeeChat v1 — Design
+# echo.r2 v1 — Design
 
-Date: 2026-11-11. Status: approved (brainstorm). Fresh rebuild; old app archived in `legacy-reference/` (gitignored, reference only).
+Date: 2026-11-11. Status: approved (brainstorm). Fresh rebuild of the old ZeeChat app (renamed echo.r2); old app archived in `legacy-reference/` (gitignored, reference only).
 
 ## Goal
 iPhone app to start, watch, and steer Claude Code sessions running on the always-on home PC, and get reliable alerts from them. The PC is the hub because the Mac travels and goes offline.
@@ -17,7 +17,7 @@ iPhone app to start, watch, and steer Claude Code sessions running on the always
 
 ## Environment facts
 - PC: Windows, Claude Code installed natively (no WSL, no tmux). Tailscale node `zee-cloud` (100.91.236.115), Tailscale exit node.
-- Mac: `rishis-macbook-pro`, intermittent. Dispatch daemon remains for Mac↔PC messaging; not used by ZeeChat v1.
+- Mac: `rishis-macbook-pro`, intermittent. Dispatch daemon remains for Mac↔PC messaging; not used by echo.r2 v1.
 - Paid Apple Developer account → TestFlight distribution, real APNs.
 - Even Terminal (`@evenrealities/even-terminal`, Node, supports Windows) drives Claude via the Agent SDK with `--resume <session-id>`, writing standard transcripts.
 
@@ -43,7 +43,7 @@ iPhone app ──(Tailscale, WSS + token)──► PC hub (Node, Windows)
 - Persistence: small JSON/SQLite store for sessions (id, cwd, title, state), device tokens, APNs tokens.
 
 ### iOS app (SwiftUI)
-- Design language: reuse the shared `DesignSystem/` from WorkoutCoach-iOS / ChessCoach-iOS (Palette, Typography, Spacing, Components, Atmosphere, ConnectionBanner, Toast, Haptics, Animations); ZeeChat gets its own palette accent + logo.
+- Design language: reuse the shared `DesignSystem/` from WorkoutCoach-iOS / ChessCoach-iOS (Palette, Typography, Spacing, Components, Atmosphere, ConnectionBanner, Toast, Haptics, Animations); echo.r2 gets its own palette accent + logo.
 - Screens: Sessions list (live state: running / waiting for you / done / external) → Session detail with Chat ⇄ Terminal toggle → New session (pick project dir on PC, optional first prompt) → Settings (pairing, notifications).
 - Terminal view: SwiftTerm.
 - Connection: WebSocket with auto-reconnect + resume from last event seq; ConnectionBanner shows offline state. Push notifications cover the app-backgrounded case.
