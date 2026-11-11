@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { execFile, execFileSync } from 'node:child_process';
 import { EventLog } from './eventlog.js';
 import { load, save } from './store.js';
+import { Tailer, parseLine, findTranscript } from './transcript.js';
 
 export function scrubEnv(env) {
   return Object.fromEntries(Object.entries(env).filter(([k, v]) => v != null && !/^CLAUDE/i.test(k)));
@@ -58,8 +59,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class Sessions {
   #map = new Map();
-  constructor({ claudeCmd, epoch, dataDir, extraArgs = () => [], extraEnv = {} }) {
-    Object.assign(this, { claudeCmd, epoch, dataDir, extraArgs, extraEnv });
+  constructor({ claudeCmd, epoch, dataDir, projectsDir, extraArgs = () => [], extraEnv = {} }) {
+    Object.assign(this, { claudeCmd, epoch, dataDir, projectsDir, extraArgs, extraEnv });
     this.file = path.join(dataDir, 'sessions.json');
     this.prior = load(this.file, []);
     let changed = false, swept = 0;
@@ -96,7 +97,46 @@ export class Sessions {
     });
   }
 
-  #persist() { save(this.file, this.list()); }
+  // ponytail: externals are never persisted; discovery rebuilds them
+  #persist() { save(this.file, this.list().filter((s) => s.source === 'hub')); }
+
+  // chat events from the transcript; hub sessions poll until claude has created the file
+  #tail(s, file) {
+    s.tailer = new Tailer(file, (o) => { for (const m of parseLine(o)) s.log.append('chat', m); }).start();
+  }
+
+  #findTail(s) {
+    const t = setInterval(() => {
+      const f = findTranscript(this.projectsDir, s.id);
+      if (f) { clearInterval(t); this.#tail(s, f); }
+    }, 1000);
+    t.unref();
+    s.findTimer = t;
+  }
+
+  addExternal({ id, cwd, label, title, transcriptPath }) {
+    const s = this.get(id);
+    if (s) {
+      if (s.source === 'external') Object.assign(s, { label, title, cwd: cwd || s.cwd, discovered: true });
+      return;
+    }
+    const e = { id, cwd, pid: 0, state: 'external', source: 'external', label, title, transcriptPath, discovered: true,
+      startedAt: new Date().toISOString(), log: new EventLog(), pty: null };
+    this.#map.set(id, e);
+    this.#tail(e, transcriptPath);
+  }
+
+  pruneExternals(seen) {
+    for (const s of this.#map.values()) {
+      if (s.discovered && !seen.has(s.id)) { s.tailer?.stop(); this.#map.delete(s.id); }
+    }
+  }
+
+  ownedIds() { return new Set([...this.#map.values()].filter((s) => s.source === 'hub').map((s) => s.id)); }
+
+  close() {
+    for (const s of this.#map.values()) { s.tailer?.stop(); clearInterval(s.findTimer); }
+  }
 
   start({ cwd, prompt }) {
     if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
@@ -114,6 +154,7 @@ export class Sessions {
     s.pid = s.pty.pid;
     this.#map.set(id, s);
     this.#persist();
+    this.#findTail(s);
     // coalesce PTY output into one term event per 25 ms
     let buf = '', timer = null;
     const flush = () => {
@@ -127,8 +168,10 @@ export class Sessions {
       timer ??= setTimeout(flush, 25);
     });
     s.pty.onExit(() => {
+      s.tailer?.stop();
       clearTimeout(timer);
       clearTimeout(s.stopTimer);
+      clearInterval(s.findTimer);
       flush();
       this.signal(s.id, 'exit');
     });
@@ -158,8 +201,10 @@ export class Sessions {
     if (!s) {
       if (!/^[0-9a-f-]{36}$/.test(id)) return;
       this.#map.set(id, { id, cwd: typeof p.cwd === 'string' ? p.cwd : '', pid: 0, state: 'external', source: 'external',
-        label: 'Unknown', transcriptPath: p.transcript_path, startedAt: new Date().toISOString(), log: new EventLog(), pty: null });
-      return this.#persist();
+        label: 'Unknown', startedAt: new Date().toISOString(), log: new EventLog(), pty: null });
+      const f = findTranscript(this.projectsDir, id);
+      if (f) this.#tail(this.get(id), f);
+      return;
     }
     if (p.hook_event_name === 'Stop') {
       clearTimeout(s.stopTimer);
@@ -173,9 +218,9 @@ export class Sessions {
   get(id) { return this.#map.get(id); }
 
   list() {
-    const live = [...this.#map.values()].map(({ id, cwd, pid, state, source, startedAt, label }) => ({ id, cwd, pid, state, source, startedAt, label }));
+    const live = [...this.#map.values()].map(({ id, cwd, pid, state, source, startedAt, label, title }) => ({ id, cwd, pid, state, source, startedAt, label, title }));
     const ids = new Set(live.map((s) => s.id));
-    return [...this.prior.filter((p) => !ids.has(p.id)), ...live];
+    return [...this.prior.filter((p) => p.source !== 'external' && !ids.has(p.id)), ...live];
   }
 
   // D-19: guard, then one per-session promise chain so pastes never interleave

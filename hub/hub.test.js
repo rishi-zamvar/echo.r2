@@ -395,7 +395,7 @@ test('hub session chat', async () => {
     const r = await fetch(`http://127.0.0.1:${h.port}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) });
     const { id } = await r.json();
     fs.mkdirSync(path.join(home, 'projects', '-x'), { recursive: true });
-    fs.writeFileSync(path.join(home, 'projects', '-x', `${id}.jsonl`), lines[1] + '\n' + lines[4] + '\n');
+    fs.writeFileSync(path.join(home, 'projects', '-x', `${id}.jsonl`), lines[3] + '\n' + lines[6] + '\n');
     await waitFor(() => h.sessions.get(id).log.since(0).events.some((e) => e.kind === 'chat' && e.text === "I'll list the files."), 4000);
     assert.ok(!h.sessions.list().some((s) => s.id === id && s.source === 'external'));
   } finally { h.close(); }

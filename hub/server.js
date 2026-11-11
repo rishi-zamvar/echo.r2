@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Sessions, resolveClaude } from './sessions.js';
+import { discoverExternal, liveSessionIds } from './transcript.js';
 import { startHookServer, writeHooksFile } from './hooks.js';
 
 const version = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
@@ -19,13 +20,15 @@ export async function startHub({
   hookPort = +process.env.ECHO_HOOK_PORT || 8791,
   killOnClose = false,
   spawnEnv = {},
+  claudeHome = process.env.ECHO_CLAUDE_HOME || path.join(os.homedir(), '.claude'),
 } = {}) {
   if (host !== '127.0.0.1') throw new Error('hub binds to 127.0.0.1 only (Phase 1)'); // T-01-01
   const epoch = crypto.randomUUID();
   const secret = crypto.randomBytes(16).toString('hex'); // per boot, child env only (D-15)
   fs.mkdirSync(dataDir, { recursive: true });
   const hooksFile = path.join(dataDir, 'hub-hooks.json');
-  const sessions = new Sessions({ claudeCmd, epoch, dataDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret } });
+  const projectsDir = path.join(claudeHome, 'projects');
+  const sessions = new Sessions({ claudeCmd, epoch, dataDir, projectsDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret } });
   const hookServer = await startHookServer({ port: hookPort, secret, onHook: (p) => sessions.hook(p) });
   const actualHookPort = hookServer.address().port;
   writeHooksFile(hooksFile, actualHookPort);
@@ -133,6 +136,14 @@ export async function startHub({
     });
   }
 
+  const scan = () => {
+    const found = discoverExternal(projectsDir, { ownedIds: sessions.ownedIds(), liveIds: liveSessionIds(claudeHome) });
+    for (const f of found) sessions.addExternal(f);
+    sessions.pruneExternals(new Set(found.map((f) => f.id)));
+  };
+  scan();
+  const scanTimer = setInterval(scan, 5000);
+
   const hb = setInterval(() => {
     for (const ws of wss.clients) {
       if (ws.isAlive === false) { ws.terminate(); continue; }
@@ -151,6 +162,8 @@ export async function startHub({
     epoch, port: actualPort, hookPort: actualHookPort, secret, sessions, server,
     close() {
       clearInterval(hb);
+      clearInterval(scanTimer);
+      sessions.close();
       for (const ws of wss.clients) ws.terminate();
       if (killOnClose) sessions.killAll();
       server.close();
