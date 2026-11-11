@@ -13,7 +13,7 @@ async function api(method, p, body) {
 }
 
 function usage() {
-  console.error('usage: cli.js list | new <cwd> [prompt...] | attach <id> [--since n] [--for s] | send <id> <text...> | interrupt <id> | stop <id>');
+  console.error('usage: cli.js list | new <cwd> [prompt...] | attach <id> [--since n] [--for s] | send <id> <text...> | interrupt <id> | stop <id> | pair [name...] | devices | revoke <id|name>');
   process.exit(2);
 }
 
@@ -95,4 +95,22 @@ if (cmd === 'list') {
   const id = await resolveId(args[0]);
   await api('POST', `/sessions/${id}/stop`);
   console.log(`stopped ${id.slice(0, 8)}`);
+} else if (cmd === 'pair') {
+  const { code, expiresIn } = await api('POST', '/admin/pair-code', { name: args.join(' ') || undefined });
+  const t = new Date(Date.now() + expiresIn * 1000).toTimeString().slice(0, 5);
+  console.log(`${code.slice(0, 4)}-${code.slice(4)}  expires ${t}`);
+} else if (cmd === 'devices') {
+  const { devices } = await api('GET', '/admin/devices');
+  if (!devices.length) console.log('no devices');
+  for (const d of devices) console.log([d.id.slice(0, 8), d.name, d.createdAt.slice(0, 10), d.lastSeen ?? '-'].join(' '));
+} else if (cmd === 'revoke') {
+  if (!args[0]) usage();
+  let target = args.join(' ');
+  if (/^[0-9a-f-]{4,}$/.test(target)) {
+    const m = (await api('GET', '/admin/devices')).devices.filter((d) => d.id.startsWith(target));
+    if (m.length > 1) { console.error('ambiguous id'); process.exit(1); }
+    if (m.length === 1) target = m[0].id;
+    else { console.error('no such device'); process.exit(1); }
+  }
+  console.log(`revoked ${(await api('POST', '/admin/revoke', { id: target })).revoked.length}`);
 } else usage();
