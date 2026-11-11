@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import { Sessions, resolveClaude } from './sessions.js';
 import { discoverExternal, liveSessionIds } from './transcript.js';
 import { startHookServer, writeHooksFile } from './hooks.js';
-import { makeWhois, tailnetIp, loadConfig, defaultTailscale } from './auth.js';
+import { makeWhois, tailnetIp, loadConfig, saveConfig, defaultTailscale, Pairing, Devices } from './auth.js';
 import { execFileSync } from 'node:child_process';
 
 const version = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
@@ -35,6 +35,8 @@ export async function startHub({
   fs.mkdirSync(dataDir, { recursive: true });
   const config = loadConfig(dataDir);
   const whois = makeWhois({ cmd: tailscale, ttlMs: whoisTtlMs });
+  const pairing = new Pairing();
+  const devices = new Devices(path.join(dataDir, 'devices.json'));
   let gitSha = 'unknown';
   try { gitSha = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: import.meta.dirname, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'unknown'; } catch {}
   const hooksFile = path.join(dataDir, 'hub-hooks.json');
@@ -81,14 +83,69 @@ export async function startHub({
 
   const makeHandler = ({ tailnet }) => async (req, res) => {
     try {
+      const url = new URL(req.url, 'http://x');
       if (tailnet) {
-        if (!(await tailnetOk(req))) return json(res, 403, { error: 'forbidden' });
-        if (req.method === 'GET' && new URL(req.url, 'http://x').pathname === '/health') return json(res, 200, health());
-        return json(res, 401, { error: 'unauthorized' }); // bearer auth arrives in plan 02
+        const login = await whois(req.socket.remoteAddress);
+        if (!login || (config.owner && login !== config.owner)) return json(res, 403, { error: 'forbidden' });
+        if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, health());
+        if (req.method === 'POST' && url.pathname === '/pair') return await pair(req, res, login);
+        if (!bearerDevice(req)) return json(res, 401, { error: 'unauthorized' });
+        return await routes(req, res, url);
       }
       if (!loopbackOk(req)) return json(res, 403, { error: 'forbidden' });
-      const url = new URL(req.url, 'http://x');
       if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, health());
+      if (url.pathname.startsWith('/admin/')) return await adminRoutes(req, res, url);
+      return await routes(req, res, url);
+    } catch {
+      if (!res.headersSent) json(res, 500, { error: 'internal' });
+    }
+  };
+
+  // Authorization header only; never the query string
+  const bearerDevice = (req) => {
+    const m = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '');
+    return m ? devices.verify(m[1]) : null;
+  };
+  const parseBody = async (req) => {
+    try { const b = JSON.parse(await readBody(req)); return b && typeof b === 'object' ? b : null; } catch { return null; }
+  };
+  const trimName = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 64) : undefined);
+
+  async function pair(req, res, login) {
+    const body = await parseBody(req);
+    const got = body ? pairing.redeem(body.code) : null;
+    if (!got) return json(res, 403, { error: 'bad_code' });
+    const name = got.name || trimName(body.deviceName) || 'device';
+    const out = devices.add(name);
+    if (!config.owner) { config.owner = login; saveConfig(dataDir, config); }
+    console.log(`paired ${name}`);
+    json(res, 201, out);
+  }
+
+  // loopback only: dispatched solely by the non-tailnet handler
+  async function adminRoutes(req, res, url) {
+    if (req.method === 'POST' && url.pathname === '/admin/pair-code') {
+      const body = (await parseBody(req)) ?? {};
+      pairing.create(trimName(body.name));
+      return json(res, 200, { code: pairing.live.code, expiresIn: Math.round(pairing.ttlMs / 1000) });
+    }
+    if (req.method === 'GET' && url.pathname === '/admin/devices') return json(res, 200, { devices: devices.list() });
+    if (req.method === 'POST' && url.pathname === '/admin/revoke') {
+      const body = await parseBody(req);
+      if (!body || typeof body.id !== 'string') return json(res, 400, { error: 'bad_json' });
+      const name = devices.items.find((d) => d.id === body.id || d.name === body.id)?.name;
+      let revoked;
+      try { revoked = devices.revoke(body.id); } catch { return json(res, 409, { error: 'ambiguous' }); }
+      if (!revoked.length) return json(res, 404, { error: 'not_found' });
+      for (const ws of wss.clients) if (revoked.includes(ws.deviceId)) ws.close(4401, 'revoked');
+      console.log(`revoked ${name}`);
+      return json(res, 200, { revoked });
+    }
+    json(res, 404, { error: 'not_found' });
+  }
+
+  async function routes(req, res, url) {
+    try {
       if (req.method === 'GET' && url.pathname === '/sessions') {
         return json(res, 200, { epoch, sessions: sessions.list() });
       }
@@ -120,7 +177,7 @@ export async function startHub({
     } catch {
       if (!res.headersSent) json(res, 500, { error: 'internal' });
     }
-  };
+  }
   const server = http.createServer(makeHandler({ tailnet: false }));
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
@@ -128,13 +185,16 @@ export async function startHub({
     sock.on('error', () => {});
     if (tailnet) {
       if (!(await tailnetOk(req))) return deny(sock, '403 Forbidden');
-      return deny(sock, '401 Unauthorized'); // bearer auth arrives in plan 02
-    }
-    if (!loopbackOk(req)) return deny(sock, '403 Forbidden');
+    } else if (!loopbackOk(req)) return deny(sock, '403 Forbidden');
+    const device = tailnet ? bearerDevice(req) : null;
+    if (tailnet && !device) return deny(sock, '401 Unauthorized');
     const u = new URL(req.url, 'http://x');
     const m = u.pathname.match(/^\/sessions\/([0-9a-f-]{36})\/stream$/);
     if (!m) return sock.destroy();
-    wss.handleUpgrade(req, sock, head, (ws) => attach(ws, m[1], u.searchParams));
+    wss.handleUpgrade(req, sock, head, (ws) => {
+      if (device) ws.deviceId = device.id;
+      attach(ws, m[1], u.searchParams);
+    });
   };
   server.on('upgrade', makeUpgrade({ tailnet: false }));
 

@@ -68,3 +68,57 @@ export function loadConfig(dataDir) {
 export function saveConfig(dataDir, cfg) {
   save(path.join(dataDir, 'config.json'), cfg, { mode: 0o600 });
 }
+
+const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const sha = (s) => crypto.createHash('sha256').update(s).digest();
+const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(a, b);
+
+// one live pairing code at a time; 5 wrong attempts burn it
+export class Pairing {
+  constructor({ ttlMs = 300000, now = Date.now } = {}) { this.ttlMs = ttlMs; this.now = now; this.live = null; }
+  create(name) {
+    let code = '';
+    for (let i = 0; i < 8; i++) code += ALPHABET[crypto.randomInt(32)];
+    this.live = { code, name, attempts: 0, expiresAt: this.now() + this.ttlMs };
+    return { code, expiresAt: this.live.expiresAt };
+  }
+  redeem(input) {
+    const l = this.live;
+    if (!l) return null;
+    if (this.now() >= l.expiresAt) { this.live = null; return null; }
+    const norm = String(input ?? '').toUpperCase().replace(/[\s-]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
+    if (same(Buffer.from(norm), Buffer.from(l.code))) { this.live = null; return { name: l.name }; }
+    if (++l.attempts >= 5) this.live = null;
+    return null;
+  }
+}
+
+// devices.json: [{id, name, hash(sha256 hex), createdAt, lastSeen}]
+export class Devices {
+  constructor(file) { this.file = file; this.items = load(file, []); this.saved = 0; }
+  persist() { save(this.file, this.items, { mode: 0o600 }); this.saved = Date.now(); }
+  add(name) {
+    const token = crypto.randomBytes(32).toString('base64url');
+    const id = crypto.randomUUID();
+    this.items.push({ id, name, hash: sha(token).toString('hex'), createdAt: new Date().toISOString(), lastSeen: null });
+    this.persist();
+    return { token, deviceId: id };
+  }
+  verify(token) {
+    const h = sha(String(token));
+    let hit = null;
+    for (const d of this.items) if (same(h, Buffer.from(d.hash, 'hex'))) hit = d; // no early exit
+    if (!hit) return null;
+    hit.lastSeen = new Date().toISOString();
+    if (Date.now() - this.saved > 60000) this.persist();
+    return hit;
+  }
+  revoke(idOrName) {
+    let m = this.items.filter((d) => d.id === idOrName);
+    if (!m.length) m = this.items.filter((d) => d.name === idOrName);
+    if (m.length > 1) throw Object.assign(new Error('ambiguous'), { code: 'ambiguous' });
+    if (m.length) { this.items = this.items.filter((d) => d !== m[0]); this.persist(); }
+    return m.map((d) => d.id);
+  }
+  list() { return this.items.map(({ id, name, createdAt, lastSeen }) => ({ id, name, createdAt, lastSeen })); }
+}

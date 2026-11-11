@@ -526,6 +526,7 @@ async function pairDevice(deviceName = 'x', b = base, t = tb) {
 const bearer = (token) => ({ authorization: `Bearer ${token}` });
 const wsOutcome = (url, headers) => new Promise((res) => {
   const ws = new WebSocket(url, { headers });
+  ws.msgs = frames(ws);
   ws.on('open', () => res({ ws, outcome: 'open' }));
   ws.on('unexpected-response', (_q, m) => res({ ws, outcome: m.statusCode }));
   ws.on('error', () => res({ ws, outcome: 'error' }));
@@ -560,8 +561,8 @@ test('bearer required', async () => {
   const wsUrl = `${tb.replace('http', 'ws')}/sessions/${id}/stream`;
   const ok = await wsOutcome(wsUrl, bearer(token));
   assert.equal(ok.outcome, 'open');
-  const hello = await new Promise((res) => ok.ws.on('message', (m) => res(JSON.parse(m.toString()))));
-  assert.equal(hello.type, 'hello');
+  await waitFor(() => ok.ws.msgs.length);
+  assert.equal(ok.ws.msgs[0].type, 'hello');
   ok.ws.close();
   assert.equal((await wsOutcome(wsUrl, {})).outcome, 401);
 });
