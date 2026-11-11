@@ -18,13 +18,14 @@ export async function startHub({
   dataDir = process.env.ECHO_DATA_DIR || path.join(os.homedir(), '.echo-hub'),
   hookPort = +process.env.ECHO_HOOK_PORT || 8791,
   killOnClose = false,
+  spawnEnv = {},
 } = {}) {
   if (host !== '127.0.0.1') throw new Error('hub binds to 127.0.0.1 only (Phase 1)'); // T-01-01
   const epoch = crypto.randomUUID();
   const secret = crypto.randomBytes(16).toString('hex'); // per boot, child env only (D-15)
   fs.mkdirSync(dataDir, { recursive: true });
   const hooksFile = path.join(dataDir, 'hub-hooks.json');
-  const sessions = new Sessions({ claudeCmd, epoch, dataDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ECHO_SECRET: secret } });
+  const sessions = new Sessions({ claudeCmd, epoch, dataDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret } });
   const hookServer = await startHookServer({ port: hookPort, secret, onHook: (p) => sessions.hook(p) });
   const actualHookPort = hookServer.address().port;
   writeHooksFile(hooksFile, actualHookPort);
@@ -77,6 +78,12 @@ export async function startHub({
           return json(res, 500, { error: 'spawn_failed' });
         }
       }
+      const m = req.method === 'POST' && url.pathname.match(/^\/sessions\/([0-9a-f-]{36})\/stop$/);
+      if (m) {
+        try { await sessions.stop(m[1]); return json(res, 200, { ok: true }); } catch (e) {
+          return json(res, { not_found: 404, read_only: 409, not_running: 409 }[e.code] ?? 500, { error: e.code ?? 'internal' });
+        }
+      }
       json(res, 404, { error: 'not_found' });
     } catch {
       if (!res.headersSent) json(res, 500, { error: 'internal' });
@@ -116,10 +123,13 @@ export async function startHub({
       try { f = JSON.parse(raw.toString()); } catch { f = null; }
       const bad = () => send({ v: 1, type: 'error', code: 'bad_frame' });
       if (!f || typeof f !== 'object') return bad();
-      if (f.type === 'input' && typeof f.text === 'string') sessions.input(id, f.text);
-      else if (f.type === 'keys' && typeof f.data === 'string') sessions.keys(id, f.data);
-      else if (f.type === 'resize' && Number.isFinite(+f.cols) && Number.isFinite(+f.rows)) sessions.resize(id, f.cols, f.rows);
-      else bad();
+      let p;
+      if (f.type === 'input' && typeof f.text === 'string') p = () => sessions.input(id, f.text);
+      else if (f.type === 'keys' && typeof f.data === 'string') p = () => sessions.keys(id, f.data);
+      else if (f.type === 'interrupt') p = () => sessions.interrupt(id);
+      else if (f.type === 'resize' && Number.isFinite(+f.cols) && Number.isFinite(+f.rows)) return sessions.resize(id, f.cols, f.rows);
+      else return bad();
+      p().catch((e) => send({ v: 1, type: 'error', code: e.code ?? 'internal' }));
     });
   }
 

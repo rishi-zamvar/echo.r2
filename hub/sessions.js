@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { EventLog } from './eventlog.js';
 import { load, save } from './store.js';
 
@@ -35,6 +35,23 @@ const NEXT = {
 // exited, stopped, external are absent from every row, so they never change
 export const transition = (state, signal) => NEXT[signal]?.[state] ?? state;
 
+// D-17: whole process tree. posix: node-pty makes the child a session leader, so -pid is its group.
+export function killTree(pid) {
+  if (process.platform === 'win32') execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {});
+  else { try { process.kill(-pid, 'SIGKILL'); } catch {} }
+}
+
+const isClaude = (pid) => {
+  try {
+    const out = process.platform === 'win32'
+      ? execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' })
+      : execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
+    return /claude/i.test(out);
+  } catch { return false; }
+};
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+const fail = (code) => Object.assign(new Error(code), { code });
+
 const STOP_DEBOUNCE_MS = 1500;
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.floor(+n) || lo));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -45,11 +62,17 @@ export class Sessions {
     Object.assign(this, { claudeCmd, epoch, dataDir, extraArgs, extraEnv });
     this.file = path.join(dataDir, 'sessions.json');
     this.prior = load(this.file, []);
-    let changed = false;
+    let changed = false, swept = 0;
     for (const p of this.prior) {
-      if (p.source === 'hub') { const n = transition(p.state, 'boot'); if (n !== p.state) { p.state = n; changed = true; } }
+      if (p.source !== 'hub') continue;
+      const n = transition(p.state, 'boot');
+      if (n === p.state) continue;
+      // T-01-15: a reused PID must not be killed unless it still looks like claude
+      if (p.pid > 1 && alive(p.pid) && isClaude(p.pid)) { killTree(p.pid); swept++; }
+      p.state = n; changed = true;
     }
-    if (changed) save(this.file, this.prior); // plan 03 adds the PID sweep that kills leftovers
+    if (changed) save(this.file, this.prior);
+    console.log(`swept ${swept}`);
     if (process.platform !== 'win32') {
       try { // Pitfall 1: darwin prebuild ships spawn-helper 0644
         const dir = path.dirname(createRequire(import.meta.url).resolve('node-pty'));
@@ -83,7 +106,7 @@ export class Sessions {
     const [file, ...prefix] = this.claudeCmd;
     const args = [...prefix, '--session-id', id, ...this.extraArgs(id), ...(prompt ? [prompt] : [])];
     const s = { id, cwd, pid: 0, state: 'starting', source: 'hub', startedAt: new Date().toISOString(),
-      log: new EventLog(), pty: null, cols: 120, rows: 30 };
+      log: new EventLog(), pty: null, cols: 120, rows: 30, q: Promise.resolve() };
     s.pty = pty.spawn(file, args, {
       name: 'xterm-256color', cols: s.cols, rows: s.rows, cwd,
       env: { ...scrubEnv(process.env), ...this.extraEnv },
@@ -155,21 +178,51 @@ export class Sessions {
     return [...this.prior.filter((p) => !ids.has(p.id)), ...live];
   }
 
-  input(id, text) {
+  // D-19: guard, then one per-session promise chain so pastes never interleave
+  #writable(id) {
     const s = this.get(id);
-    if (!s?.pty || s.state === 'exited') return;
-    clearTimeout(s.stopTimer);
-    this.signal(id, 'input');
-    s.pty.write('\x1b[200~' + text + '\x1b[201~');
-    setTimeout(() => { try { s.pty.write('\r'); } catch {} }, 80);
+    if (!s) throw fail('not_found');
+    if (s.source === 'external') throw fail('read_only');
+    if (!s.pty || s.state === 'exited' || s.state === 'stopped') throw fail('not_running');
+    return s;
   }
 
-  keys(id, data) {
-    const s = this.get(id);
-    if (!s?.pty || s.state === 'exited') return;
+  enqueue(id, fn) {
+    const s = this.#writable(id);
+    const run = s.q.then(fn);
+    s.q = run.catch((e) => console.log(`write failed ${e.message}`));
+    return run;
+  }
+
+  async input(id, text) {
+    return this.enqueue(id, async () => {
+      const s = this.get(id);
+      clearTimeout(s.stopTimer);
+      this.signal(id, 'input');
+      s.pty.write('\x1b[200~' + text + '\x1b[201~');
+      await sleep(80);
+      s.pty.write('\r');
+    });
+  }
+
+  async keys(id, data) {
+    return this.enqueue(id, () => {
+      const s = this.get(id);
+      clearTimeout(s.stopTimer);
+      this.signal(id, 'input');
+      s.pty.write(data);
+    });
+  }
+
+  async interrupt(id) { return this.enqueue(id, () => this.get(id).pty.write('\x03')); } // D-18
+
+  async stop(id) {
+    const s = this.#writable(id);
     clearTimeout(s.stopTimer);
-    this.signal(id, 'input');
-    s.pty.write(data);
+    killTree(s.pid);
+    if (process.platform === 'win32') { try { s.pty.kill(); } catch {} } // no signal arg on Windows (Pitfall 7)
+    for (let i = 0; i < 100 && s.state !== 'exited'; i++) await sleep(50);
+    if (s.state !== 'exited') this.signal(id, 'exit');
   }
 
   resize(id, cols, rows) {
