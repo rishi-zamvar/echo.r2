@@ -6,7 +6,7 @@ import path from 'node:path';
 import WebSocket from 'ws';
 import { startHub } from './server.js';
 import { EventLog } from './eventlog.js';
-import { scrubEnv } from './sessions.js';
+import { scrubEnv, transition } from './sessions.js';
 
 const fake = path.join(import.meta.dirname, 'fixtures', 'fake-claude.mjs');
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'echo-'));
@@ -23,7 +23,7 @@ function frames(ws) {
 }
 const open = (ws) => new Promise((res, rej) => { ws.on('open', res); ws.on('error', rej); });
 
-const hub = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: tmp(), killOnClose: true });
+const hub = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: tmp(), killOnClose: true, hookPort: 0 });
 const base = `http://127.0.0.1:${hub.port}`;
 const wsBase = `ws://127.0.0.1:${hub.port}`;
 after(() => hub.close());
@@ -102,4 +102,111 @@ test('epoch mismatch resets', async () => {
   assert.equal(f[0].type, 'hello');
   assert.equal(f[1].type, 'reset');
   ws.close();
+});
+
+// ---- plan 02: live state ----
+const hook = (body, secret = hub.secret) => fetch(`http://127.0.0.1:${hub.hookPort}/hook`, {
+  method: 'POST', headers: secret ? { 'x-echo-secret': secret } : {},
+  body: typeof body === 'string' ? body : JSON.stringify(body),
+});
+const st = (id) => hub.sessions.get(id).state;
+const ev = (id, kind, state) => hub.sessions.get(id).log.since(0).events.some((e) => e.kind === kind && e.state === state);
+const hp = (id, name, extra = {}) => ({ session_id: id, hook_event_name: name, transcript_path: '/t.jsonl', cwd: '/', ...extra });
+
+test('transition table', () => {
+  const rows = [
+    ['starting', 'data', 'running'], ['running', 'data', 'running'], ['waiting', 'data', 'waiting'], ['done', 'data', 'done'],
+    ['starting', 'input', 'running'], ['running', 'input', 'running'], ['waiting', 'input', 'running'], ['done', 'input', 'running'],
+    ['starting', 'stop', 'done'], ['running', 'stop', 'done'], ['waiting', 'stop', 'done'], ['done', 'stop', 'done'],
+    ['starting', 'notification', 'waiting'], ['running', 'notification', 'waiting'], ['done', 'notification', 'waiting'], ['waiting', 'notification', 'waiting'],
+    ['starting', 'exit', 'exited'], ['running', 'exit', 'exited'], ['waiting', 'exit', 'exited'], ['done', 'exit', 'exited'],
+    ['starting', 'boot', 'stopped'], ['running', 'boot', 'stopped'], ['waiting', 'boot', 'stopped'], ['done', 'boot', 'stopped'],
+  ];
+  for (const [a, sig, b] of rows) assert.equal(transition(a, sig), b, `${a}+${sig}`);
+  for (const sig of ['data', 'input', 'stop', 'notification', 'exit', 'boot']) {
+    for (const abs of ['exited', 'stopped', 'external']) assert.equal(transition(abs, sig), abs, `${abs}+${sig}`);
+  }
+});
+
+test('hook drives state', async () => {
+  const id = await create();
+  await waitFor(() => st(id) === 'running');
+  assert.equal((await hook(hp(id, 'Stop'))).status, 200);
+  await sleep(500);
+  assert.notEqual(st(id), 'done');
+  await sleep(1500);
+  assert.equal(st(id), 'done');
+  assert.ok(ev(id, 'state', 'done'));
+});
+
+test('input cancels stop debounce', async () => {
+  const id = await create();
+  await waitFor(() => st(id) === 'running');
+  await hook(hp(id, 'Stop'));
+  const ws = new WebSocket(`${wsBase}/sessions/${id}/stream`);
+  await open(ws);
+  await sleep(200);
+  ws.send(JSON.stringify({ type: 'input', text: 'x' }));
+  await sleep(2000);
+  assert.equal(st(id), 'running');
+  ws.close();
+});
+
+test('notification -> waiting', async () => {
+  const id = await create();
+  await waitFor(() => st(id) === 'running');
+  await hook(hp(id, 'Notification', { message: 'm', notification_type: 'permission_prompt' }));
+  await waitFor(() => st(id) === 'waiting', 500);
+});
+
+test('agent_id ignored', async () => {
+  const id = await create();
+  await waitFor(() => st(id) === 'running');
+  await hook(hp(id, 'Stop', { agent_id: 'a1' }));
+  await sleep(2000);
+  assert.equal(st(id), 'running');
+});
+
+test('bad secret and bad json', async () => {
+  const id = await create();
+  await waitFor(() => st(id) === 'running');
+  assert.equal((await hook(hp(id, 'Notification'), null)).status, 403);
+  assert.equal((await hook(hp(id, 'Notification'), 'wrong')).status, 403);
+  assert.equal((await hook('{nope')).status, 200);
+  await sleep(200);
+  assert.equal(st(id), 'running');
+});
+
+test('unknown session_id -> external', async () => {
+  const id = crypto.randomUUID();
+  await hook(hp(id, 'Stop'));
+  await waitFor(() => hub.sessions.get(id));
+  const list = await (await fetch(`${base}/sessions`)).json();
+  const x = list.sessions.find((s) => s.id === id);
+  assert.equal(x.state, 'external');
+  assert.equal(x.source, 'external');
+});
+
+test('pty exit -> exited', async () => {
+  const id = await create();
+  await waitFor(() => st(id) === 'running');
+  process.kill(hub.sessions.get(id).pid, 'SIGKILL');
+  await waitFor(() => st(id) === 'exited');
+});
+
+test('boot marks stopped, spawn args', async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify([{ id: 'a'.repeat(8), state: 'running', source: 'hub' }]));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true });
+  try {
+    const l = h.sessions.list();
+    assert.equal(l.find((s) => s.id === 'a'.repeat(8)).state, 'stopped');
+    const hooks = fs.readFileSync(path.join(dir, 'hub-hooks.json'), 'utf8');
+    assert.ok(hooks.includes('"type":"http"') || hooks.includes('"type": "http"'));
+    assert.ok(hooks.includes('$ECHO_SECRET'));
+    assert.ok(!hooks.includes(h.secret));
+    const r = await fetch(`http://127.0.0.1:${h.port}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) });
+    const { id } = await r.json();
+    await waitFor(() => h.sessions.get(id).log.since(0).events.some((e) => e.kind === 'term' && Buffer.from(e.data, 'base64').toString().includes(`READY session=${id}`)));
+  } finally { h.close(); }
 });
