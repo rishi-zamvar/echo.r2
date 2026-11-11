@@ -298,3 +298,105 @@ test('boot sweep kills leftover', posix, async () => {
     assert.equal(gone(bystander.pid), false);
   } finally { h.close(); }
 });
+
+// ---- plan 04: transcripts and external discovery ----
+import { parseLine, Tailer, discoverExternal } from './transcript.js';
+const fixture = fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'transcript-sample.jsonl'), 'utf8');
+const lines = fixture.split('\n').filter(Boolean);
+
+test('parser fixture', () => {
+  const out = lines.flatMap((l) => parseLine(JSON.parse(l)));
+  assert.equal(out.length, 4);
+  assert.deepEqual(out[0], { role: 'user', text: 'list the files in this repo' });
+  assert.deepEqual(out[1], { role: 'assistant', text: "I'll list the files." });
+  assert.deepEqual(out[2], { role: 'assistant', tool: 'Bash', text: 'Bash: ls -la' });
+  assert.ok(out[3].text.startsWith('There are 3 files') && out[3].text.includes('日本語'));
+});
+
+test('parser noise', () => {
+  const u = (content, extra) => ({ type: 'user', message: { role: 'user', content }, ...extra });
+  assert.deepEqual(parseLine(u('<command-name>/x</command-name>')), []);
+  assert.deepEqual(parseLine(u('hi', { isMeta: true })), []);
+  assert.deepEqual(parseLine(u('<local-command-stdout>x')), []);
+});
+
+test('tailer partial line', () => {
+  const f = path.join(tmp(), 't.jsonl');
+  const got = [];
+  const line = Buffer.from(JSON.stringify({ a: '日本語' }) + '\n');
+  const cut = line.indexOf(Buffer.from('日')) + 1; // mid-codepoint
+  fs.writeFileSync(f, line.subarray(0, cut));
+  const t = new Tailer(f, (o) => got.push(o));
+  t.poll();
+  assert.equal(got.length, 0);
+  fs.appendFileSync(f, line.subarray(cut));
+  t.poll();
+  assert.deepEqual(got, [{ a: '日本語' }]);
+});
+
+const UA = 'aaaaaaaa-0000-4000-8000-00000000000a';
+const UB = 'bbbbbbbb-0000-4000-8000-00000000000b';
+const UC = 'cccccccc-0000-4000-8000-00000000000c';
+function mkHome() {
+  const home = tmp();
+  const put = (proj, id, text) => {
+    fs.mkdirSync(path.join(home, 'projects', proj), { recursive: true });
+    const f = path.join(home, 'projects', proj, `${id}.jsonl`);
+    fs.writeFileSync(f, text);
+    return f;
+  };
+  return { home, put };
+}
+
+test('discovery', () => {
+  const { home, put } = mkHome();
+  put('-a', UA, fixture);
+  put('-b', UB, fixture.replaceAll('"entrypoint":"cli"', '"entrypoint":"sdk-ts"') + JSON.stringify({ type: 'ai-title', aiTitle: 'Newest title' }) + '\n');
+  const old = put('-c', UC, fixture);
+  const t = (Date.now() - 2 * 3600e3) / 1000;
+  fs.utimesSync(old, t, t);
+  const dir = path.join(home, 'projects');
+  const r = discoverExternal(dir, { ownedIds: new Set() });
+  assert.deepEqual(r.map((x) => x.id).sort(), [UA, UB]);
+  assert.equal(r.find((x) => x.id === UA).label, 'Terminal');
+  const b = r.find((x) => x.id === UB);
+  assert.equal(b.label, 'Even Terminal/SDK');
+  assert.equal(b.title, 'Newest title');
+  assert.equal(b.cwd, '/home/user/proj');
+  assert.deepEqual(discoverExternal(dir, { ownedIds: new Set([UA]) }).map((x) => x.id), [UB]);
+  assert.ok(discoverExternal(dir, { ownedIds: new Set(), liveIds: new Set([UC]) }).some((x) => x.id === UC));
+});
+
+test('external in hub', async () => {
+  const { home, put } = mkHome();
+  const f = put('-b', UB, fixture.replaceAll('"entrypoint":"cli"', '"entrypoint":"sdk-ts"'));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: tmp(), claudeHome: home, killOnClose: true });
+  try {
+    const l = (await (await fetch(`http://127.0.0.1:${h.port}/sessions`)).json()).sessions.find((s) => s.id === UB);
+    assert.equal(l.state, 'external');
+    assert.equal(l.source, 'external');
+    assert.equal(l.label, 'Even Terminal/SDK');
+    const ws = new WebSocket(`ws://127.0.0.1:${h.port}/sessions/${UB}/stream?since=0`);
+    const fr = frames(ws);
+    await open(ws);
+    await waitFor(() => fr.filter((x) => x.kind === 'chat').length >= 4);
+    fs.appendFileSync(f, JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'appended!' }] } }) + '\n');
+    await waitFor(() => fr.some((x) => x.kind === 'chat' && x.text === 'appended!'), 2500);
+    ws.send(JSON.stringify({ type: 'input', text: 'x' }));
+    await waitFor(() => fr.some((x) => x.type === 'error' && x.code === 'read_only'));
+    ws.close();
+  } finally { h.close(); }
+});
+
+test('hub session chat', async () => {
+  const { home } = mkHome();
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: tmp(), claudeHome: home, killOnClose: true });
+  try {
+    const r = await fetch(`http://127.0.0.1:${h.port}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) });
+    const { id } = await r.json();
+    fs.mkdirSync(path.join(home, 'projects', '-x'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'projects', '-x', `${id}.jsonl`), lines[1] + '\n' + lines[4] + '\n');
+    await waitFor(() => h.sessions.get(id).log.since(0).events.some((e) => e.kind === 'chat' && e.text === "I'll list the files."), 4000);
+    assert.ok(!h.sessions.list().some((s) => s.id === id && s.source === 'external'));
+  } finally { h.close(); }
+});
