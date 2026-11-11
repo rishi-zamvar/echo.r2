@@ -23,8 +23,8 @@
 - [ ] **SESS-01**: Rishi can start a new Claude Code session on the PC from the phone, choosing a project directory from an allowlist and an optional first prompt
 - [x] **SESS-02**: Rishi can see all sessions with live state: running, waiting for you, done, exited, stopped, external
 - [x] **SESS-03**: Sessions keep running when the phone disconnects or the app closes
-- [ ] **SESS-04**: Rishi can interrupt (Ctrl-C) or stop a session from the phone; stopping kills the whole process tree
-- [ ] **SESS-05**: Only one writer per session — input is serialized and external sessions are read-only
+- [x] **SESS-04**: Rishi can interrupt (Ctrl-C) or stop a session from the phone; stopping kills the whole process tree
+- [x] **SESS-05**: Only one writer per session — input is serialized and external sessions are read-only
 - [ ] **SESS-06**: After a hub restart, previously running sessions show as stopped and Rishi can resume them (`claude --resume`)
 
 ### Chat View
@@ -97,8 +97,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | SESS-02 | Phase 1 | Complete |
 | SESS-03 | Phase 1 | Complete |
-| SESS-04 | Phase 1 | Pending |
-| SESS-05 | Phase 1 | Pending |
+| SESS-04 | Phase 1 | Complete |
+| SESS-05 | Phase 1 | Complete |
 | HUB-01 | Phase 2 | Pending |
 | HUB-02 | Phase 2 | Pending |
 | HUB-03 | Phase 2 | Pending |
