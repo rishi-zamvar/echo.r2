@@ -26,7 +26,7 @@ async function resolveId(prefix) {
 
 if (cmd === 'list') {
   const { sessions } = await api('GET', '/sessions');
-  for (const s of sessions) console.log([s.id.slice(0, 8), s.state, s.source, s.cwd, s.label ?? s.title].filter(Boolean).join(' '));
+  for (const s of sessions) console.log([s.id.slice(0, 8), s.state, s.source, s.cwd, s.label, s.title].filter(Boolean).join(' '));
 } else if (cmd === 'new') {
   if (!args[0]) usage();
   const prompt = args.slice(1).join(' ') || undefined;
@@ -37,6 +37,7 @@ if (cmd === 'list') {
   const since = opt('--since');
   const forSec = opt('--for');
   const id = await resolveId(args[0]);
+  const chatOnly = (await api('GET', '/sessions')).sessions.find((x) => x.id === id)?.source === 'external';
   const q = new URLSearchParams();
   if (since !== undefined) q.set('since', since);
   // epoch only matters for a resume; ask the hub for the current one so a same-boot resume is not reset
@@ -55,7 +56,7 @@ if (cmd === 'list') {
     process.exit(0);
   };
   ws.on('open', () => {
-    if (!tty) return;
+    if (!tty || chatOnly) return; // externals are read-only: no raw mode, no forwarding
     sendSize();
     process.stdout.on('resize', sendSize);
     process.stdin.setRawMode(true);
@@ -70,6 +71,7 @@ if (cmd === 'list') {
     if (f.type === 'hello') epoch = f.epoch;
     else if (f.type === 'reset') process.stdout.write('\x1bc');
     else if (f.type === 'error') console.error(f.code);
+    if (f.kind === 'chat') console.log(f.tool ? `  · ${f.text}` : `${f.role === 'user' ? 'you' : 'claude'}: ${f.text}`);
     if (f.kind === 'term') process.stdout.write(Buffer.from(f.data, 'base64'));
     if (f.seq) seq = f.seq;
   });
