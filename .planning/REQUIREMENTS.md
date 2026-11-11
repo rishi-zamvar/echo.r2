@@ -10,7 +10,7 @@
 - [ ] **HUB-01**: Hub starts automatically when Rishi logs into the Windows PC and restarts itself if it crashes
 - [x] **HUB-02**: Hub is reachable only from Rishi's tailnet devices (bound to Tailscale IP; whois check fails closed)
 - [x] **HUB-03**: `/health` reports hub version, git SHA, protocol version, and uptime
-- [ ] **HUB-04**: One install script sets up the scheduled task, firewall rule, and Claude hooks on the PC; one deploy script updates the hub from git
+- [x] **HUB-04**: One install script sets up the scheduled task, firewall rule, and Claude hooks on the PC; one deploy script updates the hub from git
 
 ### Pairing & Auth
 
@@ -102,7 +102,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HUB-01 | Phase 2 | Pending |
 | HUB-02 | Phase 2 | Complete |
 | HUB-03 | Phase 2 | Complete |
-| HUB-04 | Phase 2 | Pending |
+| HUB-04 | Phase 2 | Complete |
 | AUTH-01 | Phase 2 | Complete |
 | AUTH-03 | Phase 2 | Complete |
 | APP-01 | Phase 3 | Pending |
