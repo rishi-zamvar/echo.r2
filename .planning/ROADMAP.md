@@ -74,7 +74,13 @@ Plans:
   4. User can open the live terminal (resize to fit, extra-keys bar with Esc/Tab/Ctrl-C/arrows), type into it, and toggle to chat and back.
   5. External sessions (Even Terminal, plain `claude`) appear labeled by source and open read-only in chat.
   6. After a network drop the app reconnects by itself, shows missed output without duplicates, and shows a banner while the hub is unreachable.
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+- [ ] 03-01-PLAN.md — XcodeGen + SwiftTerm probe, Core (Models/Keychain/HubClient) + macOS tests, DesignSystem + echo wordmark + AppModel, Pairing + Settings (APP-01, AUTH-02)
+- [ ] 03-02-PLAN.md — Sessions list (3 s poll, chips, externals labeled), New Session sheet, ConnectionBanner + 401 to Pairing (SESS-01, EXT-01, CONN-02, AUTH-02)
+- [ ] 03-03-PLAN.md — Frame/Replay reducer (TDD, seeded-cursor reconnect test), SessionStream actor (initialState, ping timeout, backoff, NWPath, 4404/4401) (CONN-01, CHAT-03)
+- [ ] 03-04-PLAN.md — Navigation + SessionDetailModel (retained cursor), Chat view, send/interrupt/stop, external read-only (CHAT-01..03, CONN-01, EXT-01)
+- [ ] 03-05-PLAN.md — SwiftTerm terminal, extra-keys bar, Chat/Terminal toggle, trust-dialog detector + banner (TERM-01..03)
 **UI hint**: yes
 **On-device spikes**:
   - Plain `ws://` over Tailscale vs ATS exception on a real iPhone
@@ -105,5 +111,5 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Hub Session Engine | 4/6 | In Progress|  |
 | 2. Secure Hub & PC Install | 6/7 | In Progress|  |
-| 3. iOS App | 0/TBD | Not started | - |
+| 3. iOS App | 0/5 | Planned | - |
 | 4. Push, Recovery & Release | 0/TBD | Not started | - |

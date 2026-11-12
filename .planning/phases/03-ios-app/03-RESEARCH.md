@@ -319,10 +319,10 @@ Threats: token leakage via logs (do not log headers/URLs with tokens; no token i
 | A7 | URLSessionWebSocketTask honors custom Authorization on upgrade | Stream | test against the loopback hub? loopback ignores auth; verify on tailnet listener from device/simulator with real token |
 | A8 | Local Network privacy prompt not triggered for 100.x | ATS | add `NSLocalNetworkUsageDescription` |
 
-## Open Questions
-1. Last-activity timestamp for list rows: `/sessions` has no activity field. Recommendation: use `startedAt` for v1; optional later hub tweak.
-2. Simulator runtime: free disk (5.5 GiB free) and download, or verify on the physical iPhone (`iphone-14-pro-max` is on tailnet)? Recommend: plan builds without it; ask user once for on-device install.
-3. Hub `hubName` vs MagicDNS name: prefill `rishis-macbook-pro`; when PC hub arrives its hostname will differ, which is why host is user-entered (D-07).
+## Open Questions (RESOLVED)
+1. Last-activity timestamp for list rows: `/sessions` has no activity field. RESOLVED: D-23 — list shows relative `startedAt` (ISO8601 with fractional seconds, verified live); no hub change in Phase 3.
+2. Simulator runtime: free disk (5.5 GiB free) and download, or verify on the physical iPhone? RESOLVED: D-22 — no runtime download; Core logic tested on a macOS `EchoR2Tests` target, app compiled with `generic/platform=iOS Simulator`; on-device verification in Phase 4.
+3. Hub `hubName` vs MagicDNS name. RESOLVED: D-07/D-24 — pairing host prefilled with MagicDNS `rishis-macbook-pro:8790` (user-editable, not hubName); ATS = `NSAllowsLocalNetworking` + `ts.net` exception, `NSAllowsArbitraryLoads` fallback decided at the Phase 4 device check.
 
 ## Sources
 - Source code (HIGH): `hub/server.js`, `hub/auth.js`, `hub/sessions.js`, `hub/eventlog.js`, `hub/transcript.js`, SKELETON.md
