@@ -36,7 +36,7 @@ const NEXT = {
 // exited, stopped, external are absent from every row, so they never change
 export const transition = (state, signal) => NEXT[signal]?.[state] ?? state;
 
-// D-17: whole process tree. posix: node-pty makes the child a session leader, so -pid is its group.
+// D-17: whole process tree. Only #killOwned and the boot sweep may call this. posix: node-pty makes the child a session leader, so -pid is its group.
 export function killTree(pid) {
   if (process.platform === 'win32') execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {});
   else { try { process.kill(-pid, 'SIGKILL'); } catch {} }
@@ -51,6 +51,15 @@ const ownsSession = (pid, id) => {
     return /claude/i.test(out) && out.includes(id);
   } catch { return false; }
 };
+// P0-1: a stored pid whose parent is Even Terminal belongs to it. Fail closed on any error.
+export function parentIsEvenTerminal(pid) {
+  if (process.platform === 'win32') return true;
+  try {
+    const ppid = execFileSync('ps', ['-p', String(pid), '-o', 'ppid='], { encoding: 'utf8' }).trim();
+    if (!/^\d+$/.test(ppid)) return true;
+    return /even-terminal/i.test(execFileSync('ps', ['-p', ppid, '-o', 'command='], { encoding: 'utf8' }));
+  } catch { return true; }
+}
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 const fail = (code) => Object.assign(new Error(code), { code });
 
@@ -60,6 +69,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class Sessions {
   #map = new Map();
+  #spawned = new Set(); // pids this hub process spawned this boot
   constructor({ claudeCmd, epoch, dataDir, projectsDir, extraArgs = () => [], extraEnv = {}, onAlert = () => {} }) {
     Object.assign(this, { claudeCmd, epoch, dataDir, projectsDir, extraArgs, extraEnv, onAlert });
     this.file = path.join(dataDir, 'sessions.json');
@@ -70,7 +80,9 @@ export class Sessions {
       const n = transition(p.state, 'boot');
       if (n === p.state) continue;
       // T-01-15: a reused PID must not be killed unless it still looks like claude
-      if (p.pid > 1 && alive(p.pid) && ownsSession(p.pid, p.id)) { killTree(p.pid); swept++; console.log(`swept pid ${p.pid} ${String(p.id).slice(0, 8)}`); }
+      if (p.pid > 1 && alive(p.pid) && ownsSession(p.pid, p.id) && !parentIsEvenTerminal(p.pid)) {
+        console.log(`kill pid ${p.pid} ${String(p.id).slice(0, 8)} boot-sweep`); killTree(p.pid); swept++;
+      }
       p.state = n; changed = true;
     }
     if (changed) save(this.file, this.prior);
@@ -160,6 +172,7 @@ export class Sessions {
       env: { ...scrubEnv(process.env), ...this.extraEnv },
     });
     s.pid = s.pty.pid;
+    this.#spawned.add(s.pid);
     this.#map.set(id, s);
     this.#persist();
     // coalesce PTY output into one term event per 25 ms
@@ -179,6 +192,7 @@ export class Sessions {
     cur.onExit(({ exitCode }) => {
       if (s.pty !== cur) return;
       s.exitCode = exitCode;
+      this.#spawned.delete(cur.pid);
       s.tailer?.stop();
       clearTimeout(timer);
       clearTimeout(s.stopTimer);
@@ -309,11 +323,19 @@ export class Sessions {
 
   async interrupt(id) { return this.enqueue(id, () => this.get(id).pty.write('\x03')); } // D-18
 
+  #killOwned(s, reason) {
+    const id8 = String(s.id).slice(0, 8);
+    if (!this.#spawned.has(s.pid)) { console.log(`kill refused pid ${s.pid} ${id8}`); return false; }
+    console.log(`kill pid ${s.pid} ${id8} ${reason}`);
+    killTree(s.pid);
+    return true;
+  }
+
   async stop(id) {
     const s = this.#writable(id);
     clearTimeout(s.stopTimer);
     s.userStopped = true; // 04-03 resume must reset this to false
-    killTree(s.pid);
+    this.#killOwned(s, 'stop');
     if (process.platform === 'win32') { try { s.pty.kill(); } catch {} } // no signal arg on Windows (Pitfall 7)
     for (let i = 0; i < 100 && s.state !== 'exited'; i++) await sleep(50);
     if (s.state !== 'exited') this.signal(id, 'exit');

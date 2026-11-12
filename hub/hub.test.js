@@ -316,6 +316,43 @@ test('boot sweep kills leftover', posix, async () => {
   } finally { h.close(); }
 });
 
+// ---- phase 05: safety ----
+test('stop never kills foreign pid', posix, async () => {
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: rdir(), killOnClose: true });
+  const bystander = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  after(() => { try { process.kill(bystander.pid, 'SIGKILL'); } catch {} });
+  const logs = [], orig = console.log;
+  console.log = (...a) => { logs.push(a.join(' ')); };
+  try {
+    const { id } = await (await fetch(`http://127.0.0.1:${h.port}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) })).json();
+    const s = h.sessions.get(id);
+    s.pid = bystander.pid;
+    await h.sessions.stop(id);
+    assert.equal(gone(bystander.pid), false);
+    assert.ok(logs.some((l) => l.includes(`kill refused pid ${bystander.pid}`)));
+  } finally { console.log = orig; h.close(); }
+});
+
+test('sweep spares Even Terminal child', posix, async () => {
+  const dir = tmp();
+  const etId = crypto.randomUUID();
+  fs.mkdirSync(path.join(dir, 'bin'));
+  const parentJs = path.join(dir, 'bin', 'even-terminal');
+  fs.writeFileSync(parentJs, `import { spawn } from 'node:child_process';
+const c = spawn(process.execPath, [${JSON.stringify(fake)}, '--resume', ${JSON.stringify(etId)}], { stdio: 'ignore' });
+console.log(c.pid); setInterval(() => {}, 1000);`);
+  const et = spawn(process.execPath, [parentJs], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  after(() => { try { process.kill(-et.pid, 'SIGKILL'); } catch {} });
+  const childPid = +(await new Promise((r) => et.stdout.once('data', r))).toString().trim();
+  await sleep(300);
+  fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify([{ id: etId, pid: childPid, state: 'running', source: 'hub' }]));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true });
+  try {
+    assert.equal(gone(childPid), false);
+    assert.equal(h.sessions.list().find((s) => s.id === etId).state, 'stopped');
+  } finally { h.close(); }
+});
+
 // ---- plan 04: transcripts and external discovery ----
 import { parseLine, Tailer, discoverExternal } from './transcript.js';
 const fixture = fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'transcript-sample.jsonl'), 'utf8');
