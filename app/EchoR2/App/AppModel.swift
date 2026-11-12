@@ -28,8 +28,19 @@ final class AppModel {
     var isPaired: Bool { token != nil }
 
     init() {
-        host = UserDefaults.standard.string(forKey: Self.hostKey) ?? "rishis-macbook-pro.tail748eb9.ts.net:8790"
-        token = Keychain.load(account: Keychain.account)
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-uiTestReset") {
+            Keychain.delete(account: Keychain.account)
+            UserDefaults.standard.removeObject(forKey: Self.hostKey)
+        }
+        func arg(_ name: String) -> String? { args.firstIndex(of: name).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } }
+        let testHost = arg("-uiTestHubHost"), testToken = arg("-uiTestToken")
+        #else
+        let testHost: String? = nil, testToken: String? = nil
+        #endif
+        host = testHost ?? UserDefaults.standard.string(forKey: Self.hostKey) ?? "rishis-macbook-pro.tail748eb9.ts.net:8790"
+        token = testToken ?? Keychain.load(account: Keychain.account)
     }
 
     func client() -> HubClient? {

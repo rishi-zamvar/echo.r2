@@ -19,12 +19,14 @@ struct SessionsListView: View {
                 LazyVStack(spacing: Spacing.m) {
                     ForEach(app.sessions) { s in
                         NavigationLink(value: s.id) { SessionRow(session: s) }.buttonStyle(.plain)
+                            .accessibilityIdentifier("sessions.row.\(s.id)")
                     }
                 }
                 .padding(Spacing.l)
                 .opacity(unreachable ? 0.5 : 1)
             }
         }
+        .accessibilityIdentifier("sessions.list")
         .refreshable { await app.refreshSessions() }
         // Cancelled by SwiftUI when the view disappears or the scene backgrounds.
         .task { await app.pollSessions() }

@@ -9,6 +9,9 @@ packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     exactVersion: 1.99.1
+  SnapshotTesting:
+    url: https://github.com/pointfreeco/swift-snapshot-testing
+    from: 1.17.0
 settings:
   base:
     MARKETING_VERSION: "0.1.0"
@@ -67,11 +70,42 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.rishizamvar.echor2.tests
+  EchoR2AppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: EchoR2AppTests
+        excludes:
+          - "**/__Snapshots__/**"
+    dependencies:
+      - target: EchoR2
+      - package: SnapshotTesting
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.rishizamvar.echor2.apptests
+  EchoR2UITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - EchoR2UITests
+    dependencies:
+      - target: EchoR2
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.rishizamvar.echor2.uitests
 schemes:
   EchoR2:
     build:
       targets:
         EchoR2: all
+        EchoR2AppTests: [test]
+        EchoR2UITests: [test]
+    test:
+      targets:
+        - EchoR2AppTests
+        - EchoR2UITests
   EchoR2Tests:
     build:
       targets:

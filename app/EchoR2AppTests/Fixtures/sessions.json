@@ -1,0 +1,8 @@
+{"epoch":"mock-epoch","sessions":[
+{"id":"aaaaaaaa-0000-4000-8000-000000000001","cwd":"/Users/mock/api","pid":4101,"state":"running","source":"hub","title":"Auth middleware","summary":"Refactor the auth middleware","noise":false,"lastActivity":"2026-11-12T11:59:00.000Z"},
+{"id":"aaaaaaaa-0000-4000-8000-000000000002","cwd":"/Users/mock/web","pid":0,"state":"stopped","source":"hub","title":"Landing page","summary":"Fix the landing page hero layout","noise":false,"lastActivity":"2026-11-12T09:00:00.000Z"},
+{"id":"aaaaaaaa-0000-4000-8000-000000000003","cwd":"/Users/mock/g2","pid":0,"state":"external","source":"external","label":"Even Terminal/SDK","entrypoint":"sdk-ts","summary":"Brainstorm the glasses switcher","noise":false,"lastActivity":"2026-11-12T11:30:00.000Z"},
+{"id":"aaaaaaaa-0000-4000-8000-000000000004","cwd":"/Users/mock/cli","pid":0,"state":"external","source":"external","label":"Terminal","entrypoint":"cli","summary":"Write the release notes","noise":false,"lastActivity":"2026-11-12T11:00:00.000Z"},
+{"id":"aaaaaaaa-0000-4000-8000-000000000005","cwd":"/tmp","pid":0,"state":"external","source":"external","label":"Terminal","entrypoint":"sdk-cli","summary":"Ping pong reply","noise":true,"lastActivity":"2026-11-12T08:00:00.000Z"},
+{"id":"aaaaaaaa-0000-4000-8000-000000000006","cwd":"/tmp","pid":0,"state":"done","source":"hub","summary":"one-off question","noise":true,"lastActivity":"2026-11-01T08:00:00.000Z"}
+]}
