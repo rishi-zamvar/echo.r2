@@ -13,6 +13,8 @@ final class SessionDetailModel {
     var readOnly: Bool
     var notFound = false
     var trustPrompt = false
+    var actionError: String?
+    var busy = false
 
     enum Tab: String { case chat, terminal }
     var tab: Tab {
@@ -151,6 +153,51 @@ final class SessionDetailModel {
     func interrupt() async {
         guard !readOnly else { return }
         await stream?.send(.interrupt)
+    }
+
+    func restartStream(app: AppModel) {
+        stop()
+        start(app: app)
+    }
+
+    func resume(app: AppModel) async {
+        guard !busy, let c = app.client() else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            try await c.resume(id: sessionId)
+            notFound = false
+            state = "starting"
+            await app.refreshSessions()
+            restartStream(app: app)
+        } catch HubError.server("not_resumable", _) {
+            actionError = "Already running"
+        } catch HubError.server("bad_cwd", _) {
+            actionError = "Folder is no longer allowed on the hub"
+        } catch HubError.server("claude_unavailable", _) {
+            actionError = "Claude is unavailable on the hub"
+        } catch {
+            app.handle(error)
+            actionError = "Resume failed"
+        }
+    }
+
+    func takeover(app: AppModel) async {
+        guard !busy, let c = app.client() else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            try await c.takeover(id: sessionId)
+            readOnly = false
+            tab = .chat
+            await app.refreshSessions()
+            restartStream(app: app)
+        } catch HubError.server("busy", _) {
+            actionError = "Still active elsewhere. Stop it there, then try again."
+        } catch {
+            app.handle(error)
+            actionError = "Take over failed"
+        }
     }
 
     func stopSession(app: AppModel) async {
