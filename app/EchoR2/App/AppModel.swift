@@ -25,7 +25,7 @@ final class AppModel {
     var isPaired: Bool { token != nil }
 
     init() {
-        host = UserDefaults.standard.string(forKey: Self.hostKey) ?? "rishis-macbook-pro:8790"
+        host = UserDefaults.standard.string(forKey: Self.hostKey) ?? "rishis-macbook-pro.tail748eb9.ts.net:8790"
         token = Keychain.load(account: Keychain.account)
     }
 
