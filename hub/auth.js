@@ -120,7 +120,21 @@ export class Devices {
     if (m.length) { this.items = this.items.filter((d) => d !== m[0]); this.persist(); }
     return m.map((d) => d.id);
   }
-  list() { return this.items.map(({ id, name, createdAt, lastSeen }) => ({ id, name, createdAt, lastSeen })); }
+  setPush(deviceId, token, env) {
+    for (const d of this.items) if (d.push?.token === token) delete d.push;
+    const d = this.items.find((x) => x.id === deviceId);
+    if (!d) return;
+    d.push = { token, env, at: new Date().toISOString() };
+    this.persist();
+  }
+  dropPush(token) {
+    const d = this.items.find((x) => x.push?.token === token);
+    if (d) { delete d.push; this.persist(); }
+  }
+  pushTargets(deviceId) {
+    return this.items.filter((d) => d.push && (!deviceId || d.id === deviceId)).map((d) => ({ deviceId: d.id, token: d.push.token, env: d.push.env }));
+  }
+  list() { return this.items.map(({ id, name, createdAt, lastSeen, push }) => ({ id, name, createdAt, lastSeen, push: Boolean(push) })); }
 }
 
 // D-10: cwd must resolve (symlinks included) inside a configured root

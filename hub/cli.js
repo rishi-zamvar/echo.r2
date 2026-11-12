@@ -13,7 +13,7 @@ async function api(method, p, body) {
 }
 
 function usage() {
-  console.error('usage: cli.js list | new <cwd> [prompt...] | attach <id> [--since n] [--for s] | send <id> <text...> | interrupt <id> | stop <id> | pair [name...] | devices | revoke <id|name>');
+  console.error('usage: cli.js list | new <cwd> [prompt...] | attach <id> [--since n] [--for s] | send <id> <text...> | interrupt <id> | stop <id> | pair [name...] | devices | revoke <id|name> | test-push');
   process.exit(2);
 }
 
@@ -113,4 +113,8 @@ if (cmd === 'list') {
     else { console.error('no such device'); process.exit(1); }
   }
   console.log(`revoked ${(await api('POST', '/admin/revoke', { id: target })).revoked.length}`);
+} else if (cmd === 'test-push') {
+  const { sent, results } = await api('POST', '/admin/test-push');
+  console.log(`sent ${sent}`);
+  for (const r of results) console.log(`${r.token} ${r.status} ${r.reason ?? ''}`.trim());
 } else usage();

@@ -10,6 +10,7 @@ import { discoverExternal, liveSessionIds } from './transcript.js';
 import { startHookServer, writeHooksFile } from './hooks.js';
 import { makeWhois, tailnetIp, loadConfig, saveConfig, defaultTailscale, Pairing, Devices, inRoots, listRoots } from './auth.js';
 import { execFileSync } from 'node:child_process';
+import { Push } from './apns.js';
 
 const version = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 const MAX_BODY = 1 << 20;
@@ -28,6 +29,7 @@ export async function startHub({
   retryMs = 1000,
   allowLoopbackTailnet = false, // test-only
   whoisTtlMs = 60000,
+  apnsSend, // test-only stub; default http2
 } = {}) {
   if (host !== '127.0.0.1') throw new Error('loopback listener binds 127.0.0.1 only');
   const epoch = crypto.randomUUID();
@@ -39,6 +41,7 @@ export async function startHub({
   const devices = new Devices(path.join(dataDir, 'devices.json'));
   let gitSha = 'unknown';
   try { gitSha = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: import.meta.dirname, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'unknown'; } catch {}
+  const push = new Push({ apns: config.apns ?? {}, dataDir, devices, send: apnsSend });
   const hooksFile = path.join(dataDir, 'hub-hooks.json');
   const projectsDir = path.join(claudeHome, 'projects');
   const sessions = new Sessions({ claudeCmd, epoch, dataDir, projectsDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret } });
@@ -69,7 +72,7 @@ export async function startHub({
     });
   }
 
-  const health = () => ({ ok: true, protocol: 1, version, gitSha, uptime: process.uptime(), os: process.platform, hubName: os.hostname(), epoch, claude });
+  const health = () => ({ ok: true, protocol: 1, version, gitSha, uptime: process.uptime(), os: process.platform, hubName: os.hostname(), epoch, claude, push: push.status });
   const deny = (sock, line) => { sock.end(`HTTP/1.1 ${line}\r\nConnection: close\r\n\r\n`); };
 
   // returns true if request may proceed to loopback routing; otherwise has responded
@@ -91,13 +94,14 @@ export async function startHub({
         if (!login || (config.owner && login !== config.owner)) return json(res, 403, { error: 'forbidden' });
         if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, health());
         if (req.method === 'POST' && url.pathname === '/pair') return await pair(req, res, login);
-        if (!bearerDevice(req)) return json(res, 401, { error: 'unauthorized' });
-        return await routes(req, res, url);
+        const dev = bearerDevice(req);
+        if (!dev) return json(res, 401, { error: 'unauthorized' });
+        return await routes(req, res, url, dev);
       }
       if (!loopbackOk(req)) return json(res, 403, { error: 'forbidden' });
       if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, health());
       if (url.pathname.startsWith('/admin/')) return await adminRoutes(req, res, url);
-      return await routes(req, res, url);
+      return await routes(req, res, url, null);
     } catch {
       if (!res.headersSent) json(res, 500, { error: 'internal' });
     }
@@ -143,11 +147,31 @@ export async function startHub({
       console.log(`revoked ${name}`);
       return json(res, 200, { revoked });
     }
+    if (req.method === 'POST' && url.pathname === '/admin/test-push') {
+      if (push.status !== 'ready') return json(res, 503, { error: 'push_unconfigured' });
+      const results = await push.broadcast('echo', 'test push · ' + os.hostname());
+      return json(res, 200, { sent: results.length, results });
+    }
     json(res, 404, { error: 'not_found' });
   }
 
-  async function routes(req, res, url) {
+  async function routes(req, res, url, dev) {
     try {
+      if (req.method === 'POST' && url.pathname === '/devices/push') {
+        if (!dev) return json(res, 400, { error: 'no_device' });
+        const b = await parseBody(req);
+        if (!b || typeof b.token !== 'string' || !/^[0-9a-fA-F]{64,200}$/.test(b.token) || !['sandbox', 'production'].includes(b.env)) return json(res, 400, { error: 'bad_push' });
+        devices.setPush(dev.id, b.token.toLowerCase(), b.env);
+        console.log(`push token ${dev.name} ${b.env}`);
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === 'POST' && url.pathname === '/devices/push/test') {
+        if (!dev) return json(res, 400, { error: 'no_device' });
+        if (push.status !== 'ready') return json(res, 503, { error: 'push_unconfigured' });
+        if (!devices.pushTargets(dev.id).length) return json(res, 404, { error: 'no_token' });
+        const results = await push.toDevice(dev.id, 'echo', 'test push · ' + os.hostname());
+        return json(res, 200, { sent: results.length, results });
+      }
       if (req.method === 'GET' && url.pathname === '/sessions') {
         return json(res, 200, { epoch, sessions: sessions.list() });
       }
@@ -264,6 +288,7 @@ export async function startHub({
   let tailnetServer = null;
   let closing = false;
   let resolveReady;
+  let announced = false;
   const tailnetReady = new Promise((r) => { resolveReady = r; });
   (async () => {
     let delay = retryMs;
@@ -283,6 +308,10 @@ export async function startHub({
           if (lastState !== 'up') console.log(`tailnet listening ${ip}:${t.address().port}`);
           lastState = 'up';
           resolveReady(t.address().port);
+          if (!announced) { // D-06: first bind per process only
+            announced = true;
+            push.broadcast('echo hub', `online · ${os.hostname()} · ${gitSha}`).catch((e) => console.log('hub-started push failed', e.message));
+          }
           delay = retryMs;
           await gone;
           tailnetServer = null;
@@ -310,6 +339,7 @@ export async function startHub({
       clearInterval(hb);
       clearInterval(scanTimer);
       sessions.close();
+      push.close();
       for (const ws of wss.clients) ws.terminate();
       if (killOnClose) sessions.killAll();
       server.close();
