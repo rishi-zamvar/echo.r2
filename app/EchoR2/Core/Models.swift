@@ -15,9 +15,11 @@ struct Health: Codable, Hashable, Sendable {
     var hubName: String
     var epoch: String
     var claude: ClaudeInfo?
+    /// "unconfigured" | "ready"; absent on older hubs.
+    var push: String?
 
     enum CodingKeys: String, CodingKey {
-        case ok, version, gitSha, uptime, os, hubName, epoch, claude
+        case ok, version, gitSha, uptime, os, hubName, epoch, claude, push
         case protocolVersion = "protocol"
     }
 }
@@ -96,4 +98,7 @@ struct PairRequest: Codable, Sendable { var code: String; var deviceName: String
 struct PairResponse: Codable, Sendable { var token: String; var deviceId: String }
 struct CreateSessionRequest: Codable, Sendable { var cwd: String; var prompt: String? }
 struct CreateSessionResponse: Codable, Sendable { var id: String }
+struct PushRegistration: Codable, Sendable { var token: String; var env: String }
+struct PushResult: Codable, Hashable, Sendable { var token: String; var status: Int; var reason: String? }
+struct PushTestResponse: Codable, Hashable, Sendable { var sent: Int; var results: [PushResult] }
 struct ErrorBody: Codable, Sendable { var error: String }

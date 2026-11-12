@@ -49,6 +49,19 @@ struct HubClient: Sendable {
     func stop(id: String) async throws {
         let _: Data = try await raw("sessions/\(id)/stop", method: "POST", body: nil)
     }
+    func resume(id: String) async throws {
+        let _: Data = try await raw("sessions/\(id)/resume", method: "POST", body: nil)
+    }
+    func takeover(id: String) async throws {
+        let _: Data = try await raw("sessions/\(id)/takeover", method: "POST", body: nil)
+    }
+    func registerPush(token: String, env: String) async throws {
+        let _: Data = try await raw("devices/push", method: "POST",
+                                    body: JSONEncoder().encode(PushRegistration(token: token, env: env)))
+    }
+    func testPush() async throws -> PushTestResponse {
+        try decode(try await raw("devices/push/test", method: "POST", body: Data("{}".utf8)))
+    }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
         try decode(try await raw(path, method: "GET", body: nil))
