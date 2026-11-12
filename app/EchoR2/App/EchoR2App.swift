@@ -1,12 +1,25 @@
 import SwiftUI
-import SwiftTerm
-
-struct TermProbe: UIViewRepresentable {
-    func makeUIView(context: Context) -> TerminalView { TerminalView(frame: .zero) }
-    func updateUIView(_ uiView: TerminalView, context: Context) {}
-}
 
 @main
 struct EchoR2App: App {
-    var body: some Scene { WindowGroup { TermProbe() } }
+    @State private var app = AppModel()
+
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .environment(app)
+        }
+    }
+}
+
+struct RootView: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        ZStack {
+            BackgroundAtmosphere().ignoresSafeArea()
+            // 03-02 swaps the paired root to the Sessions list, Settings behind a gear.
+            if app.isPaired { SettingsView() } else { PairingView() }
+        }
+    }
 }
