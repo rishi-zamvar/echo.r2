@@ -1,8 +1,11 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
     @State private var confirmForget = false
+    @State private var sending = false
+    @State private var testResult: String?
 
     private var appVersion: String {
         let i = Bundle.main.infoDictionary
@@ -32,6 +35,28 @@ struct SettingsView: View {
 
                 Card {
                     VStack(alignment: .leading, spacing: Spacing.s) {
+                        Eyebrow(text: "Notifications")
+                        row("Permission", app.pushAuthorized.map { $0 ? "allowed" : "off" } ?? "not asked")
+                        row("Hub push", app.health?.push ?? "unknown")
+                        row("Registered", app.pushRegistered ? "yes" : "no")
+                        if let e = app.pushError {
+                            Text(e).font(Typography.callout).foregroundStyle(Palette.danger)
+                        }
+                        SecondaryButton(title: "Send test push") { Task { await sendTest() } }
+                            .disabled(sending)
+                        if let r = testResult {
+                            Text(r).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                        }
+                        if app.pushAuthorized == false {
+                            SecondaryButton(title: "Open iOS Settings") {
+                                if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
+                            }
+                        }
+                    }
+                }
+
+                Card {
+                    VStack(alignment: .leading, spacing: Spacing.s) {
                         Eyebrow(text: "App")
                         row("Version", appVersion)
                     }
@@ -44,6 +69,25 @@ struct SettingsView: View {
         .task { await app.bootstrap() }
         .confirmationDialog("Forget this hub?", isPresented: $confirmForget, titleVisibility: .visible) {
             Button("Forget hub", role: .destructive) { app.forget() }
+        }
+    }
+
+    private func sendTest() async {
+        guard let c = app.client() else { return }
+        sending = true
+        defer { sending = false }
+        do {
+            let r = try await c.testPush()
+            var t = "Sent to \(r.sent) device(s)"
+            if let f = r.results.first, f.status != 200 { t += ": \(f.status) \(f.reason ?? "")" }
+            testResult = t
+        } catch HubError.server("push_unconfigured", _) {
+            testResult = "Hub has no APNs key yet"
+        } catch HubError.server("no_token", _) {
+            testResult = "This phone has no push token on the hub yet"
+        } catch {
+            app.handle(error)
+            testResult = "Test push failed"
         }
     }
 
