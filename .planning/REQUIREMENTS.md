@@ -31,7 +31,7 @@
 
 - [ ] **CHAT-01**: Rishi can read a session as chat: his messages, Claude's text replies, and one-line tool-use summaries, parsed from the transcript
 - [ ] **CHAT-02**: Rishi can send a message to the session from the chat view
-- [ ] **CHAT-03**: Chat view updates live as Claude writes
+- [x] **CHAT-03**: Chat view updates live as Claude writes
 
 ### Terminal View
 
@@ -46,7 +46,7 @@
 
 ### Connection
 
-- [ ] **CONN-01**: After a network drop, the app reconnects automatically and shows any output missed (seq replay), with no duplicates
+- [x] **CONN-01**: After a network drop, the app reconnects automatically and shows any output missed (seq replay), with no duplicates
 - [x] **CONN-02**: The app shows a clear banner when the hub is unreachable
 
 ### Notifications
@@ -110,12 +110,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SESS-01 | Phase 3 | Complete |
 | CHAT-01 | Phase 3 | Pending |
 | CHAT-02 | Phase 3 | Pending |
-| CHAT-03 | Phase 3 | Pending |
+| CHAT-03 | Phase 3 | Complete |
 | TERM-01 | Phase 3 | Pending |
 | TERM-02 | Phase 3 | Pending |
 | TERM-03 | Phase 3 | Pending |
 | EXT-01 | Phase 3 | Complete |
-| CONN-01 | Phase 3 | Pending |
+| CONN-01 | Phase 3 | Complete |
 | CONN-02 | Phase 3 | Complete |
 | NOTF-01 | Phase 4 | Pending |
 | NOTF-02 | Phase 4 | Pending |
