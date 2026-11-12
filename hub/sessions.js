@@ -143,18 +143,24 @@ export class Sessions {
       throw Object.assign(new Error('cwd must be an absolute existing directory'), { code: 'bad_cwd' });
     }
     const id = crypto.randomUUID();
-    const [file, ...prefix] = this.claudeCmd;
-    const args = [...prefix, '--session-id', id, ...this.extraArgs(id), ...(prompt ? [prompt] : [])];
+    const prefix = this.claudeCmd.slice(1);
     const s = { id, cwd, pid: 0, state: 'starting', source: 'hub', startedAt: new Date().toISOString(),
       log: new EventLog(), pty: null, cols: 120, rows: 30, q: Promise.resolve() };
-    s.pty = pty.spawn(file, args, {
-      name: 'xterm-256color', cols: s.cols, rows: s.rows, cwd,
+    this.#spawn(s, [...prefix, '--session-id', id, ...this.extraArgs(id), ...(prompt ? [prompt] : [])]);
+    this.#findTail(s);
+    return s;
+  }
+
+  // shared by start/resume/takeover: PTY + coalesced term events + exit handling
+  #spawn(s, args) {
+    const id = s.id;
+    s.pty = pty.spawn(this.claudeCmd[0], args, {
+      name: 'xterm-256color', cols: s.cols, rows: s.rows, cwd: s.cwd,
       env: { ...scrubEnv(process.env), ...this.extraEnv },
     });
     s.pid = s.pty.pid;
     this.#map.set(id, s);
     this.#persist();
-    this.#findTail(s);
     // coalesce PTY output into one term event per 25 ms
     let buf = '', timer = null;
     const flush = () => {
@@ -162,12 +168,15 @@ export class Sessions {
       if (buf) s.log.append('term', { data: Buffer.from(buf, 'utf8').toString('base64') });
       buf = '';
     };
-    s.pty.onData((d) => {
+    const cur = s.pty; // a resumed record gets a new pty; ignore the old one's late events
+    cur.onData((d) => {
+      if (s.pty !== cur) return;
       this.signal(s.id, 'data');
       buf += d;
       timer ??= setTimeout(flush, 25);
     });
-    s.pty.onExit(({ exitCode }) => {
+    cur.onExit(({ exitCode }) => {
+      if (s.pty !== cur) return;
       s.exitCode = exitCode;
       s.tailer?.stop();
       clearTimeout(timer);
@@ -178,8 +187,37 @@ export class Sessions {
     });
     const t = setTimeout(() => { if (s.state === 'starting') console.log(`starting timeout ${id.slice(0, 8)}`); }, 20000);
     t.unref();
+  }
+
+  // SESS-06 resume (exited / stopped hub session) and EXT-02 takeover (idle external session); same id kept
+  resume(id, { takeover = false, liveIds = new Set() } = {}) {
+    let s = this.get(id);
+    if (!s) {
+      const p = this.prior.find((x) => x.id === id && x.source === 'hub');
+      if (!p) throw fail('not_found');
+      if (takeover || (p.state !== 'stopped' && p.state !== 'exited')) throw fail('not_resumable');
+      s = { id, cwd: p.cwd, pid: 0, state: 'stopped', source: 'hub', startedAt: p.startedAt, title: p.title,
+        log: new EventLog(), pty: null, cols: 120, rows: 30, q: Promise.resolve() };
+    } else if (s.source === 'external') {
+      if (!takeover) throw fail('not_resumable');
+      const f = s.transcriptPath ?? findTranscript(this.projectsDir, id);
+      let mtime = 0;
+      try { mtime = fs.statSync(f).mtimeMs; } catch {}
+      if (liveIds.has(id) || Date.now() - mtime < 60000) throw fail('busy'); // D-08 two-writer guard
+    } else if (takeover || s.state !== 'exited') throw fail('not_resumable');
+    if (typeof s.cwd !== 'string' || !path.isAbsolute(s.cwd) || !fs.existsSync(s.cwd) || !fs.statSync(s.cwd).isDirectory()) throw fail('bad_cwd');
+    const wasExternal = s.source === 'external';
+    if (wasExternal) { s.source = 'hub'; delete s.discovered; delete s.label; Object.assign(s, { pid: 0, cols: 120, rows: 30, q: Promise.resolve() }); }
+    s.userStopped = false;
+    this.#map.set(id, s);
+    this.setState(s, 'starting');
+    this.#spawn(s, [...this.claudeCmd.slice(1), '--resume', id, ...this.extraArgs(id)]);
+    if (s.tailer && !wasExternal) s.tailer.start(); // keeps its byte offset: no duplicate chat
+    else if (!s.tailer) this.#findTail(s);
     return s;
   }
+
+  takeover(id, liveIds) { return this.resume(id, { takeover: true, liveIds }); }
 
   setState(s, state) {
     s.state = state;

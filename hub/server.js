@@ -202,6 +202,21 @@ export async function startHub({
           return json(res, { not_found: 404, read_only: 409, not_running: 409 }[e.code] ?? 500, { error: e.code ?? 'internal' });
         }
       }
+      const rm = req.method === 'POST' && url.pathname.match(/^\/sessions\/([0-9a-f-]{36})\/(resume|takeover)$/);
+      if (rm) {
+        const [, id, what] = rm;
+        if (!claude.ok) return json(res, 503, { error: 'claude_unavailable' });
+        const cwd = sessions.get(id)?.cwd ?? sessions.prior.find((p) => p.id === id)?.cwd;
+        if (cwd === undefined) return json(res, 404, { error: 'not_found' });
+        if (!inRoots(cwd, config.roots)) return json(res, 400, { error: 'bad_cwd' });
+        try {
+          if (what === 'resume') sessions.resume(id); else sessions.takeover(id, liveSessionIds(claudeHome));
+          console.log(`${what === 'resume' ? 'resumed' : 'took over'} ${id.slice(0, 8)}`);
+          return json(res, 200, { ok: true, id });
+        } catch (e) {
+          return json(res, { not_found: 404, not_resumable: 409, busy: 409, bad_cwd: 400 }[e.code] ?? 500, { error: e.code ?? 'internal' });
+        }
+      }
       json(res, 404, { error: 'not_found' });
     } catch {
       if (!res.headersSent) json(res, 500, { error: 'internal' });

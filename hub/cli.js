@@ -13,7 +13,7 @@ async function api(method, p, body) {
 }
 
 function usage() {
-  console.error('usage: cli.js list | new <cwd> [prompt...] | attach <id> [--since n] [--for s] | send <id> <text...> | interrupt <id> | stop <id> | pair [name...] | devices | revoke <id|name> | test-push');
+  console.error('usage: cli.js list | new <cwd> [prompt...] | attach <id> [--since n] [--for s] | send <id> <text...> | interrupt <id> | stop <id> | resume <id> | takeover <id> | pair [name...] | devices | revoke <id|name> | test-push');
   process.exit(2);
 }
 
@@ -95,6 +95,11 @@ if (cmd === 'list') {
   const id = await resolveId(args[0]);
   await api('POST', `/sessions/${id}/stop`);
   console.log(`stopped ${id.slice(0, 8)}`);
+} else if (cmd === 'resume' || cmd === 'takeover') {
+  if (!args[0]) usage();
+  const id = await resolveId(args[0]);
+  await api('POST', `/sessions/${id}/${cmd}`);
+  console.log(`${cmd === 'resume' ? 'resumed' : 'took over'} ${id.slice(0, 8)}`);
 } else if (cmd === 'pair') {
   const { code, expiresIn } = await api('POST', '/admin/pair-code', { name: args.join(' ') || undefined });
   const t = new Date(Date.now() + expiresIn * 1000).toTimeString().slice(0, 5);
