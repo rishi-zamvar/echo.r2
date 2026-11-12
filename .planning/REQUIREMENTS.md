@@ -29,8 +29,8 @@
 
 ### Chat View
 
-- [ ] **CHAT-01**: Rishi can read a session as chat: his messages, Claude's text replies, and one-line tool-use summaries, parsed from the transcript
-- [ ] **CHAT-02**: Rishi can send a message to the session from the chat view
+- [x] **CHAT-01**: Rishi can read a session as chat: his messages, Claude's text replies, and one-line tool-use summaries, parsed from the transcript
+- [x] **CHAT-02**: Rishi can send a message to the session from the chat view
 - [x] **CHAT-03**: Chat view updates live as Claude writes
 
 ### Terminal View
@@ -108,8 +108,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | APP-01 | Phase 3 | Complete |
 | AUTH-02 | Phase 3 | Complete |
 | SESS-01 | Phase 3 | Complete |
-| CHAT-01 | Phase 3 | Pending |
-| CHAT-02 | Phase 3 | Pending |
+| CHAT-01 | Phase 3 | Complete |
+| CHAT-02 | Phase 3 | Complete |
 | CHAT-03 | Phase 3 | Complete |
 | TERM-01 | Phase 3 | Pending |
 | TERM-02 | Phase 3 | Pending |
