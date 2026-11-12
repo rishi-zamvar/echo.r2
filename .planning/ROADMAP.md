@@ -8,7 +8,7 @@ High-risk Windows/ConPTY work goes first and is proven from a CLI client (no iOS
 
 - [ ] **Phase 1: Hub Session Engine** - Node hub on the PC runs Claude sessions in ConPTY, tracks live state, replays output; driven by a CLI client
 - [ ] **Phase 2: Secure Hub & Install (Mac stand-in + PC)** - Hub is tailnet-only, token-paired, auto-starts at login on the Mac (launchd, live now) and the PC (Task Scheduler, verified when PC returns)
-- [ ] **Phase 3: iOS App** - Paired app lists sessions, starts them, shows chat and terminal, watches external sessions, reconnects cleanly
+- [x] **Phase 3: iOS App** - Paired app lists sessions, starts them, shows chat and terminal, watches external sessions, reconnects cleanly (completed 2026-11-12)
 - [ ] **Phase 4: Push, Recovery & Release** - APNs alerts with deep links, resume/take-over, TestFlight release
 
 ## Phase Details
@@ -79,8 +79,8 @@ Plans:
 - [x] 03-01-PLAN.md — XcodeGen + SwiftTerm probe, Core (Models/Keychain/HubClient) + macOS tests, DesignSystem + echo wordmark + AppModel, Pairing + Settings (APP-01, AUTH-02)
 - [x] 03-02-PLAN.md — Sessions list (3 s poll, chips, externals labeled), New Session sheet, ConnectionBanner + 401 to Pairing (SESS-01, EXT-01, CONN-02, AUTH-02)
 - [x] 03-03-PLAN.md — Frame/Replay reducer (TDD, seeded-cursor reconnect test), SessionStream actor (initialState, ping timeout, backoff, NWPath, 4404/4401) (CONN-01, CHAT-03)
-- [ ] 03-04-PLAN.md — Navigation + SessionDetailModel (retained cursor), Chat view, send/interrupt/stop, external read-only (CHAT-01..03, CONN-01, EXT-01)
-- [ ] 03-05-PLAN.md — SwiftTerm terminal, extra-keys bar, Chat/Terminal toggle, trust-dialog detector + banner (TERM-01..03)
+- [x] 03-04-PLAN.md — Navigation + SessionDetailModel (retained cursor), Chat view, send/interrupt/stop, external read-only (CHAT-01..03, CONN-01, EXT-01)
+- [x] 03-05-PLAN.md — SwiftTerm terminal, extra-keys bar, Chat/Terminal toggle, trust-dialog detector + banner (TERM-01..03)
 **UI hint**: yes
 **On-device spikes**:
   - Plain `ws://` over Tailscale vs ATS exception on a real iPhone
@@ -111,5 +111,5 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Hub Session Engine | 4/6 | In Progress|  |
 | 2. Secure Hub & PC Install | 6/7 | In Progress|  |
-| 3. iOS App | 3/5 | In Progress|  |
+| 3. iOS App | 5/5 | Complete   | 2026-11-12 |
 | 4. Push, Recovery & Release | 0/TBD | Not started | - |

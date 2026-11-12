@@ -35,9 +35,9 @@
 
 ### Terminal View
 
-- [ ] **TERM-01**: Rishi can view the live terminal of a hub-owned session (SwiftTerm), with resize to fit the phone
-- [ ] **TERM-02**: Rishi can type into the terminal, with an extra-keys bar (Esc, Tab, Ctrl-C, arrows)
-- [ ] **TERM-03**: Rishi can toggle between chat and terminal views of the same session
+- [x] **TERM-01**: Rishi can view the live terminal of a hub-owned session (SwiftTerm), with resize to fit the phone
+- [x] **TERM-02**: Rishi can type into the terminal, with an extra-keys bar (Esc, Tab, Ctrl-C, arrows)
+- [x] **TERM-03**: Rishi can toggle between chat and terminal views of the same session
 
 ### External Sessions
 
@@ -111,9 +111,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CHAT-01 | Phase 3 | Complete |
 | CHAT-02 | Phase 3 | Complete |
 | CHAT-03 | Phase 3 | Complete |
-| TERM-01 | Phase 3 | Pending |
-| TERM-02 | Phase 3 | Pending |
-| TERM-03 | Phase 3 | Pending |
+| TERM-01 | Phase 3 | Complete |
+| TERM-02 | Phase 3 | Complete |
+| TERM-03 | Phase 3 | Complete |
 | EXT-01 | Phase 3 | Complete |
 | CONN-01 | Phase 3 | Complete |
 | CONN-02 | Phase 3 | Complete |
