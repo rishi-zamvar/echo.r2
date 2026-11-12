@@ -33,6 +33,8 @@ targets:
       path: EchoR2/Info.plist
       properties:
         CFBundleDisplayName: echo
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
         UILaunchScreen:
           UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:
@@ -53,7 +55,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.rishizamvar.echor2
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
   EchoR2Tests:
     type: bundle.unit-test
