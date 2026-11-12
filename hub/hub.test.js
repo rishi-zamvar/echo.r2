@@ -805,7 +805,7 @@ const b64u = (s) => Buffer.from(s, 'base64url');
 const TOK_A = 'ab'.repeat(32);
 const TOK_B = 'bc'.repeat(32);
 
-async function apnsHub({ seed } = {}) {
+async function apnsHub({ seed, apnsCooldownMs } = {}) {
   const dir = tmp();
   const keyPath = path.join(dir, 'AuthKey_KID123.p8');
   fs.writeFileSync(keyPath, ecPem().pem, { mode: 0o600 });
@@ -824,7 +824,7 @@ async function apnsHub({ seed } = {}) {
     return next ?? { status: 200 };
   };
   const h = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true, hookPort: 0,
-    tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, whoisTtlMs: 0, apnsSend });
+    tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, whoisTtlMs: 0, apnsSend, apnsCooldownMs });
   const t = `http://127.0.0.1:${await h.tailnetReady}`;
   return { h, dir, calls, script, base: `http://127.0.0.1:${h.port}`, tb: t, devicesFile: path.join(dir, 'devices.json') };
 }
@@ -936,4 +936,84 @@ test('push unconfigured', async () => {
   const r = await jpost(`${base}/admin/test-push`, {});
   assert.equal(r.status, 503);
   assert.equal((await r.json()).error, 'push_unconfigured');
+});
+
+// plan 04-02: alerts
+import { Push } from './apns.js';
+const seedDev = () => [{ id: crypto.randomUUID(), name: 's', hash: 'a'.repeat(64), createdAt: new Date().toISOString(), lastSeen: null, push: { token: TOK_A, env: 'sandbox', at: new Date().toISOString() } }];
+const forSession = (a, id) => a.calls.filter((c) => c.payload.sessionId === id);
+const hookTo = (a, body) => fetch(`http://127.0.0.1:${a.h.hookPort}/hook`, { method: 'POST', headers: { 'x-echo-secret': a.h.secret }, body: JSON.stringify(body) });
+const mkSession = async (a) => (await (await fetch(`${a.base}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) })).json()).id;
+
+test('alert on stop/notification/exit', async () => {
+  const a = await apnsHub({ seed: seedDev(), apnsCooldownMs: 200 });
+  try {
+    const id = await mkSession(a);
+    await hookTo(a, { session_id: id, hook_event_name: 'Stop', last_assistant_message: 'All tests pass\nmore' });
+    await waitFor(() => forSession(a, id).length >= 1, 3000);
+    await sleep(300);
+    assert.equal(forSession(a, id).length, 1);
+    assert.equal(forSession(a, id)[0].headers['apns-collapse-id'], id);
+    assert.equal(forSession(a, id)[0].payload.aps.alert.body, 'All tests pass');
+    await hookTo(a, { session_id: id, hook_event_name: 'Notification', message: 'Claude needs your permission to use Bash' });
+    await waitFor(() => forSession(a, id).length >= 2, 3000);
+    assert.equal(forSession(a, id)[1].payload.aps.alert.body, 'Claude needs your permission to use Bash');
+  } finally { a.h.close(); }
+});
+
+test('no exited push on user stop', async () => {
+  const a = await apnsHub({ seed: seedDev() });
+  try {
+    const id = await mkSession(a);
+    assert.equal((await fetch(`${a.base}/sessions/${id}/stop`, { method: 'POST' })).status, 200);
+    await sleep(500);
+    assert.equal(forSession(a, id).filter((c) => c.payload.aps.alert.body.startsWith('exited')).length, 0);
+  } finally { a.h.close(); }
+});
+
+test('exited push on crash', { skip: process.platform === 'win32' }, async () => {
+  const a = await apnsHub({ seed: seedDev() });
+  try {
+    const id = await mkSession(a);
+    process.kill(a.h.sessions.get(id).pid, 'SIGKILL');
+    await waitFor(() => forSession(a, id).length >= 1, 3000);
+    assert.ok(forSession(a, id)[0].payload.aps.alert.body.startsWith('exited (code'));
+  } finally { a.h.close(); }
+});
+
+test('external alert', async () => {
+  const a = await apnsHub({ seed: seedDev() });
+  try {
+    const id = crypto.randomUUID();
+    await fetch(`http://127.0.0.1:${a.h.hookPort}/hook/ext/${a.h.config.hookSecret}`, { method: 'POST',
+      body: JSON.stringify({ session_id: id, hook_event_name: 'Notification', message: 'waiting on you', cwd: '/x/proj' }) });
+    await waitFor(() => forSession(a, id).length >= 1, 3000);
+    await sleep(200);
+    assert.equal(forSession(a, id).length, 1);
+    assert.equal(forSession(a, id)[0].payload.aps.alert.title, 'proj');
+    assert.equal(forSession(a, id)[0].payload.aps.alert.body, 'waiting on you');
+  } finally { a.h.close(); }
+});
+
+test('cooldown collapse', async () => {
+  let clock = 0;
+  const timers = [];
+  const calls = [];
+  const devices = { pushTargets: () => [{ token: TOK_A, env: 'sandbox' }], dropPush() {} };
+  const p = new Push({ apns: { keyId: 'K', teamId: 'T', bundleId: 'b', keyPath: (() => { const f = path.join(tmp(), 'k.p8'); fs.writeFileSync(f, ecPem().pem, { mode: 0o600 }); return f; })() },
+    devices, send: async (r) => { calls.push(r); return { status: 200 }; }, now: () => clock, cooldownMs: 10000,
+    setTimer: (fn) => { const t = { fn }; timers.push(t); return t; } });
+  const s = { id: 'sid', title: 'T', lastStop: 'fin', lastMessage: 'need' };
+  await p.alert(s, 'done'); await p.alert(s, 'done'); await p.alert(s, 'done');
+  assert.equal(calls.length, 1);
+  await p.alert(s, 'waiting');
+  assert.equal(calls.length, 1);
+  clock = 10000;
+  await timers[0].fn();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].payload.aps.alert.body, 'need');
+  clock = 25000;
+  await p.alert(s, 'waiting');
+  assert.equal(calls.length, 3);
+  p.close();
 });
