@@ -792,3 +792,148 @@ test('plist dry run', { skip: process.platform !== 'darwin' }, () => {
   for (const s of ['com.rishizamvar.echo-hub', 'RunAtLoad', 'KeepAlive', 'ThrottleInterval', path.join(import.meta.dirname, 'server.js'), 'launchd.log']) assert.ok(r.stdout.includes(s), s);
   assert.equal(fs.existsSync(plist), before);
 });
+
+// ---- plan 04-01: push ----
+import crypto from 'node:crypto';
+import { makeJwt, apnsRequest, alertText } from './apns.js';
+
+const ecPem = () => {
+  const kp = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  return { publicKey: kp.publicKey, pem: kp.privateKey.export({ type: 'pkcs8', format: 'pem' }) };
+};
+const b64u = (s) => Buffer.from(s, 'base64url');
+const TOK_A = 'ab'.repeat(32);
+const TOK_B = 'bc'.repeat(32);
+
+async function apnsHub({ seed } = {}) {
+  const dir = tmp();
+  const keyPath = path.join(dir, 'AuthKey_KID123.p8');
+  fs.writeFileSync(keyPath, ecPem().pem, { mode: 0o600 });
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
+    owner: 'owner@example.com', roots: [fs.realpathSync(os.tmpdir())],
+    apns: { keyId: 'KID123', teamId: '373D7DZ9NM', bundleId: 'com.rishizamvar.echor2', keyPath },
+  }));
+  if (seed) fs.writeFileSync(path.join(dir, 'devices.json'), JSON.stringify(seed));
+  const calls = [];
+  const script = {}; // token -> array of results / Errors, consumed in order
+  const apnsSend = async (req) => {
+    calls.push(req);
+    const tok = req.headers[':path'].split('/').pop();
+    const next = script[tok]?.shift();
+    if (next instanceof Error) throw next;
+    return next ?? { status: 200 };
+  };
+  const h = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true, hookPort: 0,
+    tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, whoisTtlMs: 0, apnsSend });
+  const t = `http://127.0.0.1:${await h.tailnetReady}`;
+  return { h, dir, calls, script, base: `http://127.0.0.1:${h.port}`, tb: t, devicesFile: path.join(dir, 'devices.json') };
+}
+
+test('apns jwt', () => {
+  const { publicKey, pem } = ecPem();
+  const jwt = makeJwt({ keyId: 'KID123', teamId: '373D7DZ9NM', key: pem }, 1700000000);
+  const [h, c, s] = jwt.split('.');
+  assert.deepEqual(JSON.parse(b64u(h)), { alg: 'ES256', kid: 'KID123' });
+  assert.deepEqual(JSON.parse(b64u(c)), { iss: '373D7DZ9NM', iat: 1700000000 });
+  assert.equal(b64u(s).length, 64);
+  assert.equal(crypto.verify('sha256', Buffer.from(h + '.' + c), { key: publicKey, dsaEncoding: 'ieee-p1363' }, b64u(s)), true);
+});
+
+test('apns payload', () => {
+  const S = crypto.randomUUID();
+  const r = apnsRequest({ token: TOK_A, env: 'sandbox', bundleId: 'com.rishizamvar.echor2', sessionId: S, title: 'x'.repeat(100), body: 'y'.repeat(300) });
+  assert.equal(r.host, 'https://api.sandbox.push.apple.com');
+  assert.equal(apnsRequest({ token: TOK_A, env: 'production', bundleId: 'b' }).host, 'https://api.push.apple.com');
+  assert.equal(r.headers[':path'], `/3/device/${TOK_A}`);
+  assert.equal(r.headers['apns-topic'], 'com.rishizamvar.echor2');
+  assert.equal(r.headers['apns-push-type'], 'alert');
+  assert.equal(r.headers['apns-priority'], '10');
+  assert.equal(r.headers['apns-collapse-id'], S);
+  const { alert, sound } = r.payload.aps;
+  assert.ok(alert.title.length <= 60 && alert.title.endsWith('…'));
+  assert.ok(alert.body.length <= 140 && alert.body.endsWith('…'));
+  assert.equal(sound, 'default');
+  assert.equal(r.payload.aps['thread-id'], S);
+  assert.equal(r.payload.sessionId, S);
+  assert.deepEqual(alertText('done', { title: '', cwd: '/a/b/proj', lastStop: 'first line\nsecond' }), { title: 'proj', body: 'first line' });
+  assert.equal(alertText('waiting', { title: 'T', lastMessage: 'Claude needs your permission' }).body, 'Claude needs your permission');
+  assert.equal(alertText('exited', { title: 'T', exitCode: 3 }).body, 'exited (code 3)');
+});
+
+test('push token register', async () => {
+  const { token, deviceId } = await pairDevice('pusher');
+  const reg = (body, headers = bearer(token), b = tb) => jpost(`${b}/devices/push`, body, headers);
+  assert.equal((await reg({ token: TOK_A, env: 'sandbox' })).status, 200);
+  assert.equal((await reg({ token: 'zz', env: 'sandbox' })).status, 400);
+  assert.equal((await (await reg({ token: 'zz', env: 'sandbox' })).json()).error, 'bad_push');
+  assert.equal((await reg({ token: TOK_A, env: 'dev' })).status, 400);
+  assert.equal((await reg({ token: TOK_A, env: 'sandbox' }, {})).status, 401);
+  const lb = await reg({ token: TOK_A, env: 'sandbox' }, {}, base);
+  assert.equal(lb.status, 400);
+  assert.equal((await lb.json()).error, 'no_device');
+  const file = path.join(hubDir, 'devices.json');
+  const dev = () => JSON.parse(fs.readFileSync(file, 'utf8')).find((d) => d.id === deviceId);
+  assert.equal(dev().push.token, TOK_A);
+  assert.equal(dev().push.env, 'sandbox');
+  assert.ok(!(await (await fetch(`${base}/admin/devices`)).text()).includes(TOK_A));
+  assert.equal((await jpost(`${base}/admin/revoke`, { id: deviceId })).status, 200);
+  assert.ok(!fs.readFileSync(file, 'utf8').includes(TOK_A));
+});
+
+test('push send + cleanup', async () => {
+  const a = await apnsHub();
+  try {
+    assert.equal((await (await fetch(`${a.base}/health`)).json()).push, 'ready');
+    const dA = await pairDevice('A', a.base, a.tb);
+    const dB = await pairDevice('B', a.base, a.tb);
+    assert.equal((await jpost(`${a.tb}/devices/push`, { token: TOK_A, env: 'sandbox' }, bearer(dA.token))).status, 200);
+    assert.equal((await jpost(`${a.tb}/devices/push`, { token: TOK_B, env: 'production' }, bearer(dB.token))).status, 200);
+    a.script[TOK_A] = [{ status: 410, reason: 'Unregistered' }];
+    const r = await jpost(`${a.base}/admin/test-push`, {});
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).sent, 2);
+    const hostOf = (tok) => a.calls.find((c) => c.headers[':path'].endsWith(tok)).host;
+    assert.equal(hostOf(TOK_A), 'https://api.sandbox.push.apple.com');
+    assert.equal(hostOf(TOK_B), 'https://api.push.apple.com');
+    const file = fs.readFileSync(a.devicesFile, 'utf8');
+    assert.ok(!file.includes(TOK_A));
+    assert.ok(file.includes(TOK_B));
+
+    const callsFor = () => a.calls.filter((c) => c.headers[':path'].endsWith(TOK_B)).length;
+    for (const [seq, want] of [
+      [[{ status: 500 }, { status: 200 }], 2],
+      [[{ status: 500 }, { status: 500 }, { status: 200 }], 2],
+      [[new Error('conn'), { status: 200 }], 2],
+    ]) {
+      a.calls.length = 0;
+      a.script[TOK_B] = seq;
+      await jpost(`${a.base}/admin/test-push`, {});
+      assert.equal(callsFor(), want);
+    }
+    // device-scoped test route: caller's token only
+    a.calls.length = 0;
+    const own = await jpost(`${a.tb}/devices/push/test`, {}, bearer(dB.token));
+    assert.equal(own.status, 200);
+    assert.equal((await own.json()).sent, 1);
+    assert.equal((await jpost(`${a.tb}/devices/push/test`, {}, bearer(dA.token))).status, 404); // A's token was dropped
+  } finally { a.h.close(); }
+});
+
+test('hub started push', async () => {
+  const seed = [{ id: crypto.randomUUID(), name: 'seeded', hash: 'a'.repeat(64), createdAt: new Date().toISOString(), lastSeen: null, push: { token: TOK_A, env: 'sandbox', at: new Date().toISOString() } }];
+  const a = await apnsHub({ seed });
+  try {
+    await waitFor(() => a.calls.length >= 1);
+    await sleep(300);
+    assert.equal(a.calls.length, 1);
+    assert.equal(a.calls[0].payload.aps.alert.title, 'echo hub');
+    assert.ok(a.calls[0].payload.aps.alert.body.startsWith('online · '));
+  } finally { a.h.close(); }
+});
+
+test('push unconfigured', async () => {
+  assert.equal((await (await fetch(`${base}/health`)).json()).push, 'unconfigured');
+  const r = await jpost(`${base}/admin/test-push`, {});
+  assert.equal(r.status, 503);
+  assert.equal((await r.json()).error, 'push_unconfigured');
+});
