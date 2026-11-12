@@ -30,6 +30,7 @@ export async function startHub({
   allowLoopbackTailnet = false, // test-only
   whoisTtlMs = 60000,
   apnsSend, // test-only stub; default http2
+  apnsCooldownMs, // test-only
 } = {}) {
   if (host !== '127.0.0.1') throw new Error('loopback listener binds 127.0.0.1 only');
   const epoch = crypto.randomUUID();
@@ -41,10 +42,10 @@ export async function startHub({
   const devices = new Devices(path.join(dataDir, 'devices.json'));
   let gitSha = 'unknown';
   try { gitSha = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: import.meta.dirname, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'unknown'; } catch {}
-  const push = new Push({ apns: config.apns ?? {}, dataDir, devices, send: apnsSend });
+  const push = new Push({ apns: config.apns ?? {}, dataDir, devices, send: apnsSend, cooldownMs: apnsCooldownMs });
   const hooksFile = path.join(dataDir, 'hub-hooks.json');
   const projectsDir = path.join(claudeHome, 'projects');
-  const sessions = new Sessions({ claudeCmd, epoch, dataDir, projectsDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret } });
+  const sessions = new Sessions({ claudeCmd, epoch, dataDir, projectsDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret }, onAlert: (s, kind) => push.alert(s, kind) });
   const hookServer = await startHookServer({ port: hookPort, secret, extSecret: config.hookSecret,
     onHook: (p) => sessions.hook(p),
     onExtHook: (p) => { if (p && typeof p.session_id === 'string' && sessions.ownedIds().has(p.session_id)) return; sessions.hook(p); } });

@@ -59,8 +59,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class Sessions {
   #map = new Map();
-  constructor({ claudeCmd, epoch, dataDir, projectsDir, extraArgs = () => [], extraEnv = {} }) {
-    Object.assign(this, { claudeCmd, epoch, dataDir, projectsDir, extraArgs, extraEnv });
+  constructor({ claudeCmd, epoch, dataDir, projectsDir, extraArgs = () => [], extraEnv = {}, onAlert = () => {} }) {
+    Object.assign(this, { claudeCmd, epoch, dataDir, projectsDir, extraArgs, extraEnv, onAlert });
     this.file = path.join(dataDir, 'sessions.json');
     this.prior = load(this.file, []);
     let changed = false, swept = 0;
@@ -167,7 +167,8 @@ export class Sessions {
       buf += d;
       timer ??= setTimeout(flush, 25);
     });
-    s.pty.onExit(() => {
+    s.pty.onExit(({ exitCode }) => {
+      s.exitCode = exitCode;
       s.tailer?.stop();
       clearTimeout(timer);
       clearTimeout(s.stopTimer);
@@ -184,6 +185,11 @@ export class Sessions {
     s.state = state;
     s.log.append('state', { state });
     this.#persist();
+    if (s.source === 'hub' && (state === 'done' || state === 'waiting' || state === 'exited') && !(state === 'exited' && s.userStopped)) this.#alert(s, state);
+  }
+
+  #alert(s, kind) {
+    try { this.onAlert(s, kind); } catch (e) { console.log(`alert failed ${e.message}`); } // never break state handling
   }
 
   signal(id, sig) {
@@ -197,21 +203,24 @@ export class Sessions {
     if (!p || typeof p !== 'object' || typeof p.session_id !== 'string' || typeof p.hook_event_name !== 'string') return;
     if (p.agent_id || p.hook_event_name === 'SubagentStop') return; // Pitfall 6
     const id = p.session_id;
-    const s = this.get(id);
+    let s = this.get(id);
     if (!s) {
       if (!/^[0-9a-f-]{36}$/.test(id)) return;
       this.#map.set(id, { id, cwd: typeof p.cwd === 'string' ? p.cwd : '', pid: 0, state: 'external', source: 'external',
         label: 'Unknown', startedAt: new Date().toISOString(), log: new EventLog(), pty: null });
       const f = findTranscript(this.projectsDir, id);
       if (f) this.#tail(this.get(id), f);
-      return;
+      s = this.get(id);
     }
+    const ext = s.source === 'external';
     if (p.hook_event_name === 'Stop') {
+      if (typeof p.last_assistant_message === 'string') s.lastStop = p.last_assistant_message;
       clearTimeout(s.stopTimer);
-      s.stopTimer = setTimeout(() => this.signal(id, 'stop'), STOP_DEBOUNCE_MS);
+      s.stopTimer = setTimeout(() => (ext ? this.#alert(s, 'done') : this.signal(id, 'stop')), STOP_DEBOUNCE_MS);
     } else if (p.hook_event_name === 'Notification') {
       s.lastMessage = p.message;
-      this.signal(id, 'notification');
+      if (ext) this.#alert(s, 'waiting');
+      else this.signal(id, 'notification');
     }
   }
 
@@ -264,6 +273,7 @@ export class Sessions {
   async stop(id) {
     const s = this.#writable(id);
     clearTimeout(s.stopTimer);
+    s.userStopped = true; // 04-03 resume must reset this to false
     killTree(s.pid);
     if (process.platform === 'win32') { try { s.pty.kill(); } catch {} } // no signal arg on Windows (Pitfall 7)
     for (let i = 0; i < 100 && s.state !== 'exited'; i++) await sleep(50);

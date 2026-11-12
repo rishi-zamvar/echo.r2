@@ -62,8 +62,9 @@ export function http2Send() {
 }
 
 export class Push {
-  constructor({ apns = {}, dataDir = '.', devices, send, now = Date.now, cooldownMs = 10000 }) {
-    this.devices = devices; this.now = now; this.cooldownMs = cooldownMs;
+  constructor({ apns = {}, dataDir = '.', devices, send, now = Date.now, cooldownMs = 10000, setTimer = setTimeout }) {
+    this.devices = devices; this.now = now; this.cooldownMs = cooldownMs; this.setTimer = setTimer;
+    this.cool = new Map(); // sessionId -> {until, lastKey, pending, timer}
     this.cfg = apns;
     this.jwt = null; this.jwtAt = 0; this.key = null;
     this.status = 'unconfigured';
@@ -106,7 +107,28 @@ export class Push {
 
   broadcast(title, body) { return this.toTokens(this.devices.pushTargets(), { title, body }); }
   toDevice(deviceId, title, body) { return this.toTokens(this.devices.pushTargets(deviceId), { title, body }); }
-  // 04-02 adds the per-session cooldown on top
-  alert(s, kind) { return this.toTokens(this.devices.pushTargets(), { ...alertText(kind, s), sessionId: s.id }); }
-  close() { this.send?.close?.(); }
+  // NOTF-04: one push per session per cooldown window; a different state inside the window goes out once at its end
+  alert(s, kind) {
+    const msg = { ...alertText(kind, s), sessionId: s.id };
+    const key = `${kind}|${msg.body}`;
+    const c = this.cool.get(s.id) ?? { until: 0 };
+    this.cool.set(s.id, c);
+    const fire = (m, k) => { c.lastKey = k; c.until = this.now() + this.cooldownMs; return this.toTokens(this.devices.pushTargets(), m); };
+    if (this.now() >= c.until) return fire(msg, key);
+    if (key === c.lastKey) return null;
+    c.pending = { msg, key };
+    c.timer ??= (() => {
+      const t = this.setTimer(() => {
+        const p = c.pending; c.pending = null; c.timer = null;
+        return p && p.key !== c.lastKey ? fire(p.msg, p.key) : null;
+      }, Math.max(0, c.until - this.now()));
+      t.unref?.();
+      return t;
+    })();
+    return null;
+  }
+  close() {
+    for (const c of this.cool.values()) if (c.timer) clearTimeout(c.timer);
+    this.send?.close?.();
+  }
 }
