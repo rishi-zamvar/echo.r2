@@ -1,7 +1,9 @@
 #!/bin/sh
-# Install the echo hub as a per-user launchd agent and merge Claude hooks. --dry-run prints the plist only.
+# Install the echo hub as a per-user launchd agent and optionally merge Claude hooks (--global-hooks; off by default, Even Terminal shares settings.json). --dry-run prints the plist only.
 set -eu
 LABEL=com.rishizamvar.echo-hub
+DRY=0; GH=0
+for a in "$@"; do case "$a" in --dry-run) DRY=1;; --global-hooks) GH=1;; esac; done
 HUB=$(cd "$(dirname "$0")/.." && pwd)
 NODE=$(command -v node || true); [ -n "$NODE" ] || { echo "node not found" >&2; exit 1; }
 CLAUDE_BIN=$(command -v claude || true); [ -n "$CLAUDE_BIN" ] || { echo "claude not found" >&2; exit 1; }
@@ -33,11 +35,11 @@ PLIST_TEXT=$(cat <<PL
 PL
 )
 
-if [ "${1:-}" = "--dry-run" ]; then printf '%s\n' "$PLIST_TEXT"; exit 0; fi
+if [ $DRY = 1 ]; then printf '%s\n' "$PLIST_TEXT"; [ $GH = 1 ] && echo "global hooks: on" || echo "global hooks: off"; exit 0; fi
 
 mkdir -p "$DATA" "$HOME/Library/LaunchAgents"; chmod 700 "$DATA"
 (cd "$HUB" && npm ci --omit=dev)
-"$NODE" "$HUB/install/hooks-merge.js" merge
+[ $GH = 1 ] && "$NODE" "$HUB/install/hooks-merge.js" merge
 TMP=$(mktemp "${TMPDIR:-/tmp}/echo-hub.XXXXXX")
 printf '%s\n' "$PLIST_TEXT" > "$TMP"
 plutil -lint "$TMP" >/dev/null

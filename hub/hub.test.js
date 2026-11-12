@@ -828,7 +828,10 @@ test('plist dry run', { skip: process.platform !== 'darwin' }, () => {
   const sh = path.join(import.meta.dirname, 'install', 'install.sh');
   const r = spawnSync('sh', [sh, '--dry-run'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  const lint = spawnSync('plutil', ['-lint', '-'], { input: r.stdout, encoding: 'utf8' });
+  assert.ok(r.stdout.includes('global hooks: off'));
+  const on = spawnSync('sh', [sh, '--global-hooks', '--dry-run'], { encoding: 'utf8' });
+  assert.ok(on.stdout.includes('global hooks: on'));
+  const lint = spawnSync('plutil', ['-lint', '-'], { input: r.stdout.replace(/global hooks: off\n$/, ''), encoding: 'utf8' });
   assert.equal(lint.status, 0, lint.stdout + lint.stderr);
   for (const s of ['com.rishizamvar.echo-hub', 'RunAtLoad', 'KeepAlive', 'ThrottleInterval', path.join(import.meta.dirname, 'server.js'), 'launchd.log']) assert.ok(r.stdout.includes(s), s);
   assert.equal(fs.existsSync(plist), before);

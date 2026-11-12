@@ -6,7 +6,7 @@ Commands run from the repo root. Data dir: `~/.echo-hub` (override `ECHO_DATA_DI
 
     sh hub/install/install.sh
 
-Changes: LaunchAgent `~/Library/LaunchAgents/com.rishizamvar.echo-hub.plist` (RunAtLoad, KeepAlive, ThrottleInterval 10); Stop/Notification http hooks merged into `~/.claude/settings.json` (first backup kept as `settings.json.echo-bak`); `~/.echo-hub` created mode 700. `sh hub/install/install.sh --dry-run` prints the plist and changes nothing.
+Changes: LaunchAgent `~/Library/LaunchAgents/com.rishizamvar.echo-hub.plist` (RunAtLoad, KeepAlive, ThrottleInterval 10); global Claude hooks are OFF by default because Even Terminal shares `~/.claude/settings.json`: hub-owned sessions get hooks via `--settings`, external alerts come from the transcript, and `--global-hooks` (`-GlobalHooks` on PC) re-enables the old merge into `settings.json` (first backup kept as `settings.json.echo-bak`); `~/.echo-hub` created mode 700. `sh hub/install/install.sh --dry-run` prints the plist and changes nothing.
 
 Check:
 

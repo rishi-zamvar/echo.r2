@@ -1,5 +1,6 @@
 # UNVERIFIED on Windows until plan 02-07 (PC down). Run from an elevated PowerShell.
 # Registers the echo-hub logon task, the tailnet-only firewall rule, and the Claude hooks.
+param([switch]$GlobalHooks)  # global Claude hooks are opt-in (Even Terminal shares settings.json)
 $ErrorActionPreference = 'Stop'
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -15,8 +16,10 @@ npm ci --omit=dev
 if ($LASTEXITCODE) { Pop-Location; exit 1 }
 Pop-Location
 
-& $node "$hub\install\hooks-merge.js" merge
-if ($LASTEXITCODE) { exit 1 }
+if ($GlobalHooks) {
+  & $node "$hub\install\hooks-merge.js" merge
+  if ($LASTEXITCODE) { exit 1 }
+}
 
 # Hidden launch via powershell.exe; a brief console flash is possible (UNVERIFIED).
 $arg = "-NoProfile -WindowStyle Hidden -Command `"& '$node' '$hub\server.js'; exit `$LASTEXITCODE`""
