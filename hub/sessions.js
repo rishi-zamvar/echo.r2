@@ -42,12 +42,13 @@ export function killTree(pid) {
   else { try { process.kill(-pid, 'SIGKILL'); } catch {} }
 }
 
-const isClaude = (pid) => {
+// P0-1: only a process whose command line carries THIS session id is ours. A bare /claude/ match
+// can hit Even Terminal's per-turn `claude --resume` after PID reuse. Windows: no cmdline check yet → never sweep-kill.
+const ownsSession = (pid, id) => {
+  if (process.platform === 'win32' || !id) return false;
   try {
-    const out = process.platform === 'win32'
-      ? execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' })
-      : execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
-    return /claude/i.test(out);
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
+    return /claude/i.test(out) && out.includes(id);
   } catch { return false; }
 };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
@@ -69,7 +70,7 @@ export class Sessions {
       const n = transition(p.state, 'boot');
       if (n === p.state) continue;
       // T-01-15: a reused PID must not be killed unless it still looks like claude
-      if (p.pid > 1 && alive(p.pid) && isClaude(p.pid)) { killTree(p.pid); swept++; }
+      if (p.pid > 1 && alive(p.pid) && ownsSession(p.pid, p.id)) { killTree(p.pid); swept++; console.log(`swept pid ${p.pid} ${String(p.id).slice(0, 8)}`); }
       p.state = n; changed = true;
     }
     if (changed) save(this.file, this.prior);

@@ -294,17 +294,21 @@ test('external read-only', async () => {
 
 test('boot sweep kills leftover', posix, async () => {
   const dir = tmp();
-  const victim = spawn(process.execPath, [fake], { detached: true, stdio: 'ignore' });
+  const victim = spawn(process.execPath, [fake, '--session-id', 'v'.repeat(8)], { detached: true, stdio: 'ignore' });
   const bystander = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
-  after(() => { for (const c of [victim, bystander]) try { process.kill(c.pid, 'SIGKILL'); } catch {} });
+  // P0-1: a claude-looking process for ANOTHER session (Even Terminal after PID reuse) must survive
+  const impostor = spawn(process.execPath, [fake, '--resume', 'x'.repeat(8)], { detached: true, stdio: 'ignore' });
+  after(() => { for (const c of [victim, bystander, impostor]) try { process.kill(c.pid, 'SIGKILL'); } catch {} });
   await sleep(300);
   fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify([
     { id: 'v'.repeat(8), pid: victim.pid, state: 'running', source: 'hub' },
     { id: 'b'.repeat(8), pid: bystander.pid, state: 'running', source: 'hub' },
+    { id: 'i'.repeat(8), pid: impostor.pid, state: 'running', source: 'hub' },
   ]));
   const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true });
   try {
     await waitFor(() => gone(victim.pid), 3000);
+    assert.ok(!gone(impostor.pid), 'must not kill a claude process for another session');
     const l = h.sessions.list();
     assert.equal(l.find((s) => s.id === 'v'.repeat(8)).state, 'stopped');
     assert.equal(l.find((s) => s.id === 'b'.repeat(8)).state, 'stopped');
