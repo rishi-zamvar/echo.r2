@@ -21,6 +21,9 @@ final class AppModel {
     var sessionsLoaded = false
     /// NavigationStack path: session ids.
     var path: [String] = []
+    var pushAuthorized: Bool?
+    var pushRegistered = false
+    var pushError: String?
 
     var isPaired: Bool { token != nil }
 
@@ -60,7 +63,28 @@ final class AppModel {
         sessions = []
         sessionsLoaded = false
         path = []
+        pushRegistered = false
+        pushError = nil
         connectionState = .unknown
+    }
+
+    func registerPush(token: String) async {
+        guard let c = client() else { return }
+        do {
+            try await c.registerPush(token: token, env: PushToken.env)
+            pushRegistered = true
+            pushError = nil
+        } catch {
+            pushError = "Push registration failed"
+            if case .unauthorized? = error as? HubError { handle(error) }
+        }
+    }
+
+    /// Deep link from a tapped push; opens even if the list has not caught up.
+    func open(sessionId: String) async {
+        guard isPaired else { return }
+        if !sessions.contains(where: { $0.id == sessionId }) { await refreshSessions() }
+        path = DeepLink.path(opening: sessionId)
     }
 
     func handle(_ error: Error) {

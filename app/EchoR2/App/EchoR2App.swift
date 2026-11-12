@@ -2,12 +2,12 @@ import SwiftUI
 
 @main
 struct EchoR2App: App {
-    @State private var app = AppModel()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environment(app)
+                .environment(delegate.app)
         }
     }
 }
@@ -27,6 +27,7 @@ struct RootView: View {
                 }
             } else { PairingView() }
         }
+        .task(id: app.isPaired) { if app.isPaired { await PushSetup.enable(app) } }
         .onChange(of: scenePhase) { _, p in
             if p == .active, app.isPaired { Task { await app.bootstrap() } }
         }
