@@ -40,6 +40,11 @@ struct HubClient: Sendable {
         try await send("pair", method: "POST", body: PairRequest(code: code, deviceName: deviceName))
     }
     func sessions() async throws -> SessionsResponse { try await get("sessions") }
+    func history(id: String, before: Int? = nil, limit: Int = 200) async throws -> HistoryResponse {
+        var q = "sessions/\(id)/history?limit=\(limit)"
+        if let before { q += "&before=\(before)" }
+        return try await get(q)
+    }
     func roots() async throws -> RootsResponse { try await get("sessions/roots") }
     func createSession(cwd: String, prompt: String?) async throws -> String {
         let r: CreateSessionResponse = try await send("sessions", method: "POST",
@@ -75,7 +80,9 @@ struct HubClient: Sendable {
     }
 
     private func raw(_ path: String, method: String, body: Data?) async throws -> Data {
-        var req = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: 10)
+        // appendingPathComponent would percent-encode a query string.
+        let url = path.contains("?") ? (URL(string: base.absoluteString + "/" + path) ?? base) : base.appendingPathComponent(path)
+        var req = URLRequest(url: url, timeoutInterval: 15)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }

@@ -17,7 +17,7 @@ final class FrameTests: XCTestCase {
 
     func testChatAndTool() {
         guard case let .event(_, .chat(a)) = Frame.decode(#"{"v":1,"seq":4,"kind":"chat","role":"assistant","text":"yo"}"#) else { return XCTFail() }
-        XCTAssertEqual(a.text, "yo"); XCTAssertNil(a.tool); XCTAssertEqual(a.id, 4)
+        XCTAssertEqual(a.text, "yo"); XCTAssertNil(a.tool); XCTAssertEqual(a.id, "s4")
         guard case let .event(_, .chat(b)) = Frame.decode(#"{"v":1,"seq":5,"kind":"chat","role":"assistant","text":"x","tool":"Bash"}"#) else { return XCTFail() }
         XCTAssertEqual(b.tool, "Bash")
     }

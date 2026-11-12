@@ -5,7 +5,9 @@ struct ChatLine: Sendable, Hashable, Identifiable {
     let role: String
     let text: String
     let tool: String?
-    var id: Int { seq }
+    /// Transcript line index from the hub (`i`); the dedupe key across history and live stream.
+    var index: Int? = nil
+    var id: String { index.map { "i\($0)" } ?? "s\(seq)" }
 }
 
 enum StreamEvent: Sendable {
@@ -35,6 +37,7 @@ enum Frame: Sendable {
         var role: String?
         var text: String?
         var tool: String?
+        var i: Int?
     }
 
     static func decode(_ text: String) -> Frame {
@@ -59,7 +62,7 @@ enum Frame: Sendable {
             return .event(seq: seq, .term(d))
         case "chat":
             guard let role = r.role, let t = r.text else { return .event(seq: seq, .other) }
-            return .event(seq: seq, .chat(ChatLine(seq: seq, role: role, text: t, tool: r.tool)))
+            return .event(seq: seq, .chat(ChatLine(seq: seq, role: role, text: t, tool: r.tool, index: r.i)))
         case "state":
             return .event(seq: seq, r.state.map { .state($0) } ?? .other)
         default:
