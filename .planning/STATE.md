@@ -51,6 +51,8 @@ Progress: [████████░░] 83%
 
 ### Pending Todos
 
+- Rishi request (2026-11-12): zero-tap auto-pair — if the request comes from a tailnet device whose whois LoginName == owner, hub issues the token without a code (`POST /pair/auto`), app tries it on first launch. Keep code pairing as fallback; keep revoke.
+- Add `ITSAppUsesNonExemptEncryption = NO` to Info.plist so TestFlight builds skip export-compliance.
 - Phase 3: sessions started in an untrusted folder sit at Claude's folder-trust dialog (default = exit). Surface a `needs_trust` hint (detect dialog text in PTY output) and let the user answer it from the Terminal view; never auto-edit ~/.claude.json.
 - iPhone Tailscale key expires 2026-11-24 — disable expiry for iphone-14-pro-max.
 - Login autostart of the Mac hub not yet proven — after next real login check `curl -s 127.0.0.1:8790/health`.
