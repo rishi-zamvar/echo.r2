@@ -51,6 +51,12 @@ Requirements: APP-01, AUTH-02, SESS-01, CHAT-01, CHAT-02, CHAT-03, TERM-01, TERM
 ### Testing
 - **D-21:** Unit tests (no network): envelope decoding (all frame types incl. unknown kind ignored), seq dedupe/replay logic, reset handling, trust-dialog detector, Keychain helper round-trip, roots/session JSON decoding. A `MockHub` is NOT built — UI verified by simulator build + screenshots via XcodeBuildMCP if available; live smoke against the running Mac hub from the simulator (simulator shares the Mac's network/Tailscale, so `http://100.125.215.102:8790` and loopback both work — research confirms).
 
+### Post-research decisions (auto)
+- **D-22:** No iOS Simulator runtime on this Mac and ~5.5 GB free disk → do NOT download a runtime. Verification = (a) logic in `app/EchoR2/Core/` (Foundation + Security only) compiled into both the app and a `platform: macOS` test target `EchoR2Tests`, run with `xcodebuild test` on macOS; (b) `xcodebuild build -destination 'generic/platform=iOS Simulator'` (and `generic/platform=iOS`) for UI + SwiftTerm compile checks; (c) on-device verification on Rishi's iPhone in Phase 4 (TestFlight). Wave 0 compiles a SwiftTerm stub first.
+- **D-23:** Session list shows relative `startedAt` (no hub change in Phase 3).
+- **D-24:** ATS: `NSAllowsLocalNetworking` + `ts.net` exception domain (subdomains, insecure HTTP). Default host = MagicDNS `rishis-macbook-pro` (not hubName). If on-device test shows 100.x literal/bare host blocked, fall back to `NSAllowsArbitraryLoads` (WorkoutCoach precedent) — decided in Phase 4 device check.
+- **D-25:** WS close 4404 = session gone (don't retry), 4401 = revoked (go to pairing). On `reset`, set lastSeq=0 before applying replay.
+
 ### Claude's Discretion
 - File/folder layout inside `app/EchoR2/`, exact component styling within the copied DesignSystem, animation choices, empty states.
 
