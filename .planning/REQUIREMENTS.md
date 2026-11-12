@@ -20,7 +20,7 @@
 
 ### Sessions
 
-- [ ] **SESS-01**: Rishi can start a new Claude Code session on the PC from the phone, choosing a project directory from an allowlist and an optional first prompt
+- [x] **SESS-01**: Rishi can start a new Claude Code session on the PC from the phone, choosing a project directory from an allowlist and an optional first prompt
 - [x] **SESS-02**: Rishi can see all sessions with live state: running, waiting for you, done, exited, stopped, external
 - [x] **SESS-03**: Sessions keep running when the phone disconnects or the app closes
 - [x] **SESS-04**: Rishi can interrupt (Ctrl-C) or stop a session from the phone; stopping kills the whole process tree
@@ -41,13 +41,13 @@
 
 ### External Sessions
 
-- [ ] **EXT-01**: Sessions started outside the hub (Even Terminal, plain terminal `claude`) appear in the list as external, labeled by source, and can be watched read-only in chat view
+- [x] **EXT-01**: Sessions started outside the hub (Even Terminal, plain terminal `claude`) appear in the list as external, labeled by source, and can be watched read-only in chat view
 - [ ] **EXT-02**: Rishi can "Take over" an external session, which resumes it inside the hub after confirming it is no longer active
 
 ### Connection
 
 - [ ] **CONN-01**: After a network drop, the app reconnects automatically and shows any output missed (seq replay), with no duplicates
-- [ ] **CONN-02**: The app shows a clear banner when the hub is unreachable
+- [x] **CONN-02**: The app shows a clear banner when the hub is unreachable
 
 ### Notifications
 
@@ -107,16 +107,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AUTH-03 | Phase 2 | Complete |
 | APP-01 | Phase 3 | Complete |
 | AUTH-02 | Phase 3 | Complete |
-| SESS-01 | Phase 3 | Pending |
+| SESS-01 | Phase 3 | Complete |
 | CHAT-01 | Phase 3 | Pending |
 | CHAT-02 | Phase 3 | Pending |
 | CHAT-03 | Phase 3 | Pending |
 | TERM-01 | Phase 3 | Pending |
 | TERM-02 | Phase 3 | Pending |
 | TERM-03 | Phase 3 | Pending |
-| EXT-01 | Phase 3 | Pending |
+| EXT-01 | Phase 3 | Complete |
 | CONN-01 | Phase 3 | Pending |
-| CONN-02 | Phase 3 | Pending |
+| CONN-02 | Phase 3 | Complete |
 | NOTF-01 | Phase 4 | Pending |
 | NOTF-02 | Phase 4 | Pending |
 | NOTF-03 | Phase 4 | Pending |
