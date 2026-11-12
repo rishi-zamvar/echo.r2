@@ -325,7 +325,7 @@ export function openLog(file, { maxBytes = 5 * 1024 * 1024 } = {}) {
   rotate();
   const timer = setInterval(rotate, 3600000);
   timer.unref();
-  const log = (...args) => { try { fs.appendFileSync(file, `${new Date().toISOString()} ${args.join(' ')}\n`); } catch {} };
+  const log = (...args) => { try { fs.appendFileSync(file, `${new Date().toISOString()} ${args.join(' ')}\n`, { mode: 0o600 }); } catch {} };
   log.close = () => clearInterval(timer);
   return log;
 }
