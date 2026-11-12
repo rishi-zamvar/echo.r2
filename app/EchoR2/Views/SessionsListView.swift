@@ -17,7 +17,9 @@ struct SessionsListView: View {
                 EmptyState(title: "No sessions", message: "Tap + to start.", systemImage: "terminal")
             } else {
                 LazyVStack(spacing: Spacing.m) {
-                    ForEach(app.sessions) { SessionRow(session: $0) }
+                    ForEach(app.sessions) { s in
+                        NavigationLink(value: s.id) { SessionRow(session: s) }.buttonStyle(.plain)
+                    }
                 }
                 .padding(Spacing.l)
                 .opacity(unreachable ? 0.5 : 1)
@@ -37,8 +39,9 @@ struct SessionsListView: View {
                     .accessibilityLabel("New session")
             }
         }
+        .navigationDestination(for: String.self) { SessionDetailView(sessionId: $0) }
         .sheet(isPresented: $showNew) {
-            NewSessionView { _ in }
+            NewSessionView { app.path.append($0) }
         }
     }
 }
@@ -52,29 +55,13 @@ private struct SessionRow: View {
         return f
     }()
 
-    private func color(_ t: ChipTone) -> Color {
-        switch t {
-        case .primary: Palette.primaryDeep
-        case .warning: Palette.warning
-        case .success: Palette.success
-        case .muted: Palette.textMuted
-        case .danger: Palette.danger
-        case .accent: Palette.accentDeep
-        }
-    }
-
     var body: some View {
-        let chip = session.chip
         Card {
             VStack(alignment: .leading, spacing: Spacing.s) {
                 HStack {
                     Text(session.displayTitle).font(Typography.heading).foregroundStyle(Palette.ink).lineLimit(1)
                     Spacer()
-                    Text(chip.text)
-                        .font(Typography.caption)
-                        .padding(.horizontal, Spacing.m).padding(.vertical, 4)
-                        .background(color(chip.tone).opacity(0.25), in: Capsule())
-                        .foregroundStyle(Palette.ink)
+                    StateChip(session: session)
                 }
                 if session.isExternal {
                     if let l = session.label, !l.isEmpty {
@@ -86,5 +73,29 @@ private struct SessionRow: View {
                 }
             }
         }
+    }
+}
+
+/// State capsule shared by the list and the detail toolbar.
+struct StateChip: View {
+    let session: SessionInfo
+
+    private var color: Color {
+        switch session.chip.tone {
+        case .primary: Palette.primaryDeep
+        case .warning: Palette.warning
+        case .success: Palette.success
+        case .muted: Palette.textMuted
+        case .danger: Palette.danger
+        case .accent: Palette.accentDeep
+        }
+    }
+
+    var body: some View {
+        Text(session.chip.text)
+            .font(Typography.caption)
+            .padding(.horizontal, Spacing.m).padding(.vertical, 4)
+            .background(color.opacity(0.25), in: Capsule())
+            .foregroundStyle(Palette.ink)
     }
 }

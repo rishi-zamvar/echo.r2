@@ -19,6 +19,8 @@ final class AppModel {
     var demoMode = false
     var sessions: [SessionInfo] = []
     var sessionsLoaded = false
+    /// NavigationStack path: session ids.
+    var path: [String] = []
 
     var isPaired: Bool { token != nil }
 
@@ -57,6 +59,7 @@ final class AppModel {
         health = nil
         sessions = []
         sessionsLoaded = false
+        path = []
         connectionState = .unknown
     }
 

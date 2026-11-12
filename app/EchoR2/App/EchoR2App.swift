@@ -17,12 +17,13 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        @Bindable var app = app
         ZStack {
             BackgroundAtmosphere().ignoresSafeArea()
             if app.isPaired {
                 VStack(spacing: 0) {
                     ConnectionBanner()
-                    NavigationStack { SessionsListView() }
+                    NavigationStack(path: $app.path) { SessionsListView() }
                 }
             } else { PairingView() }
         }
