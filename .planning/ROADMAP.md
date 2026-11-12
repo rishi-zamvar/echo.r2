@@ -121,3 +121,13 @@ Plans:
 | 2. Secure Hub & PC Install | 6/7 | In Progress|  |
 | 3. iOS App | 5/5 | Complete   | 2026-11-12 |
 | 4. Push, Recovery & Release | 6/7 | In Progress|  |
+
+### Phase 5: v1.1 Safety, Chat and UI Rebuild
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 4
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 5 to break down)
