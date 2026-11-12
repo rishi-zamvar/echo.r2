@@ -14,12 +14,20 @@ struct EchoR2App: App {
 
 struct RootView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
             BackgroundAtmosphere().ignoresSafeArea()
-            // 03-02 swaps the paired root to the Sessions list, Settings behind a gear.
-            if app.isPaired { SettingsView() } else { PairingView() }
+            if app.isPaired {
+                VStack(spacing: 0) {
+                    ConnectionBanner()
+                    NavigationStack { SessionsListView() }
+                }
+            } else { PairingView() }
+        }
+        .onChange(of: scenePhase) { _, p in
+            if p == .active, app.isPaired { Task { await app.bootstrap() } }
         }
     }
 }

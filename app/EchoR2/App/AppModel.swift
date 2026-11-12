@@ -17,6 +17,8 @@ final class AppModel {
     var connectionState: ConnectionState = .unknown
     var lastSuccessfulCall: Date?
     var demoMode = false
+    var sessions: [SessionInfo] = []
+    var sessionsLoaded = false
 
     var isPaired: Bool { token != nil }
 
@@ -53,6 +55,8 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: Self.hostKey)
         token = nil
         health = nil
+        sessions = []
+        sessionsLoaded = false
         connectionState = .unknown
     }
 
@@ -72,6 +76,24 @@ final class AppModel {
     func bootstrap() async {
         guard let c = client() else { return }
         do { health = try await c.health(); markOK() }
-        catch { handle(error) }
+        catch { handle(error); return }
+        await refreshSessions()
+    }
+
+    /// On failure the last-known list stays in place.
+    func refreshSessions() async {
+        guard let c = client() else { return }
+        do {
+            sessions = SessionInfo.sorted(try await c.sessions().sessions)
+            sessionsLoaded = true
+            markOK()
+        } catch { handle(error) }
+    }
+
+    func pollSessions() async {
+        while !Task.isCancelled {
+            await refreshSessions()
+            try? await Task.sleep(for: .seconds(3))
+        }
     }
 }

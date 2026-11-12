@@ -22,6 +22,8 @@ struct Health: Codable, Hashable, Sendable {
     }
 }
 
+enum ChipTone: Sendable { case primary, warning, success, muted, danger, accent }
+
 struct SessionInfo: Codable, Hashable, Sendable, Identifiable {
     var id: String
     var cwd: String
@@ -39,7 +41,38 @@ struct SessionInfo: Codable, Hashable, Sendable, Identifiable {
     var isExternal: Bool { source == "external" }
     var displayTitle: String {
         if let title, !title.isEmpty { return title }
-        return (cwd as NSString).lastPathComponent
+        if !cwd.isEmpty { return (cwd as NSString).lastPathComponent }
+        if let label, !label.isEmpty { return label }
+        return "Session"
+    }
+
+    var chip: (text: String, tone: ChipTone) {
+        if isExternal { return ("watching", .accent) }
+        switch state {
+        case "running", "starting": return (state, .primary)
+        case "waiting": return ("needs you", .warning)
+        case "done": return ("done", .success)
+        case "stopped": return ("stopped", .danger)
+        default: return (state, .muted)
+        }
+    }
+
+    /// waiting, running/starting, done, exited/stopped/unknown, externals last.
+    var sortRank: Int {
+        if isExternal { return 4 }
+        switch state {
+        case "waiting": return 0
+        case "running", "starting": return 1
+        case "done": return 2
+        default: return 3
+        }
+    }
+
+    static func sorted(_ list: [SessionInfo]) -> [SessionInfo] {
+        list.sorted {
+            if $0.sortRank != $1.sortRank { return $0.sortRank < $1.sortRank }
+            return ($0.startedDate ?? .distantPast) > ($1.startedDate ?? .distantPast)
+        }
     }
 }
 

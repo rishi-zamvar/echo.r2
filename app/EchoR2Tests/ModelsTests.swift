@@ -25,6 +25,35 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(s.displayTitle, "x")
     }
 
+    private func sess(_ id: String, _ state: String, source: String = "hub", at: String? = nil) -> SessionInfo {
+        SessionInfo(id: id, cwd: "/x/\(id)", pid: nil, state: state, source: source, startedAt: at, label: nil, title: nil)
+    }
+
+    func testChipAndTitle() {
+        XCTAssertEqual(sess("a", "waiting").chip.text, "needs you")
+        XCTAssertEqual(sess("a", "waiting").chip.tone, .warning)
+        XCTAssertEqual(sess("a", "running").chip.tone, .primary)
+        XCTAssertEqual(sess("a", "done").chip.tone, .success)
+        XCTAssertEqual(sess("a", "exited").chip.tone, .muted)
+        XCTAssertEqual(sess("a", "stopped").chip.tone, .danger)
+        XCTAssertEqual(sess("a", "external", source: "external").chip.text, "watching")
+        XCTAssertEqual(sess("a", "weird").chip.text, "weird")
+        var s = sess("a", "done"); s.cwd = ""; s.label = "Even Terminal"
+        XCTAssertEqual(s.displayTitle, "Even Terminal")
+        s.label = nil
+        XCTAssertEqual(s.displayTitle, "Session")
+    }
+
+    func testSorted() {
+        let t1 = "2026-01-01T00:00:00.000Z", t2 = "2026-01-02T00:00:00.000Z"
+        let out = SessionInfo.sorted([
+            sess("ext", "external", source: "external", at: t2), sess("exited", "exited", at: t2),
+            sess("done", "done", at: t2), sess("runOld", "running", at: t1),
+            sess("runNew", "running", at: t2), sess("wait", "waiting", at: t1),
+        ])
+        XCTAssertEqual(out.map(\.id), ["wait", "runNew", "runOld", "done", "exited", "ext"])
+    }
+
     func testRoots() throws {
         _ = try JSONDecoder().decode(RootsResponse.self, from: fixture("roots.json"))
         XCTAssertEqual(Root(root: "/a", dirs: ["b", "c"]).cwdOptions, ["/a", "/a/b", "/a/c"])
