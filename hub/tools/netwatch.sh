@@ -10,7 +10,7 @@ mkdir -p "$DROPS"
 prev=-1; tick=0; prevpath=""; previf=""
 phonepath() { $TS status 2>/dev/null | awk -v ip="$PHONE" '$1==ip {$1=$2=$3=$4="";print}' | sed 's/^ *//'; }
 kind() { case "$1" in *direct*) echo direct;; *relay*) echo relay;; *idle*) echo idle;; *) echo "${1:-none}";; esac; }
-etproc() { p=$(pgrep -f "bin/even-terminal" | head -1); [ -n "$p" ] && echo "pid=$p rss_kb=$(ps -o rss= -p $p | tr -d ' ') up=$(ps -o etime= -p $p | tr -d ' ')" || echo "NOT RUNNING"; }
+etproc() { p=$(ps -axo pid=,command= | awk '/node .*bin\/even-terminal/ && !/awk/ {print $1; exit}'); [ -n "$p" ] && echo "pid=$p rss_kb=$(ps -o rss= -p $p | tr -d ' ') up=$(ps -o etime= -p $p | tr -d ' ')" || echo "NOT RUNNING"; }
 snap() {
   hub=$(curl -s -m 1 127.0.0.1:8790/health >/dev/null && echo up || echo down)
   echo "path=[$(phonepath)] if=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}') hub=$hub load=[$(sysctl -n vm.loadavg | tr -d '{}')] et=[$(etproc)]"
