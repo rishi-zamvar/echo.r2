@@ -15,7 +15,7 @@
 ### Pairing & Auth
 
 - [x] **AUTH-01**: Rishi can pair the phone by entering a single-use, 5-minute code printed by a local `hub pair` command
-- [ ] **AUTH-02**: Paired phone stays authenticated across app restarts (token in Keychain, sent in header)
+- [x] **AUTH-02**: Paired phone stays authenticated across app restarts (token in Keychain, sent in header)
 - [x] **AUTH-03**: Rishi can revoke a paired device from the PC; the app returns to pairing on 401
 
 ### Sessions
@@ -59,7 +59,7 @@
 
 ### App & Distribution
 
-- [ ] **APP-01**: App uses the shared DesignSystem (from WorkoutCoach/ChessCoach) with its own echo.r2 accent and logo
+- [x] **APP-01**: App uses the shared DesignSystem (from WorkoutCoach/ChessCoach) with its own echo.r2 accent and logo
 - [ ] **APP-02**: App builds from XcodeGen `project.yml` and ships to Rishi's phone via TestFlight with one release script
 
 ## v2 Requirements
@@ -105,8 +105,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HUB-04 | Phase 2 | Complete |
 | AUTH-01 | Phase 2 | Complete |
 | AUTH-03 | Phase 2 | Complete |
-| APP-01 | Phase 3 | Pending |
-| AUTH-02 | Phase 3 | Pending |
+| APP-01 | Phase 3 | Complete |
+| AUTH-02 | Phase 3 | Complete |
 | SESS-01 | Phase 3 | Pending |
 | CHAT-01 | Phase 3 | Pending |
 | CHAT-02 | Phase 3 | Pending |
