@@ -10,7 +10,7 @@ DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
 
 ARCHIVE=(xcodebuild archive -project EchoR2.xcodeproj -scheme EchoR2 -configuration Release
   -destination 'generic/platform=iOS' -archivePath build/release/EchoR2.xcarchive
-  -derivedDataPath build/release/dd -allowProvisioningUpdates "CURRENT_PROJECT_VERSION=$BUILD")
+  -derivedDataPath build/release/dd -allowProvisioningUpdates -skipPackagePluginValidation -skipMacroValidation "CURRENT_PROJECT_VERSION=$BUILD")
 EXPORT=(xcodebuild -exportArchive -archivePath build/release/EchoR2.xcarchive
   -exportPath build/release/export -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates)
 
