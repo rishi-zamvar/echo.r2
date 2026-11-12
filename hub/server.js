@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Sessions, resolveClaude } from './sessions.js';
-import { discoverExternal, liveSessionIds } from './transcript.js';
+import { discoverExternal, liveSessionIds, readHistory, findTranscript } from './transcript.js';
 import { startHookServer, writeHooksFile } from './hooks.js';
 import { makeWhois, tailnetIp, loadConfig, saveConfig, defaultTailscale, Pairing, Devices, inRoots, listRoots } from './auth.js';
 import { execFileSync } from 'node:child_process';
@@ -219,6 +219,23 @@ export async function startHub({
           if (e.code === 'even_terminal' || e.code === 'live_elsewhere') console.log(`refused ${what} ${id.slice(0, 8)} ${e.code}`);
           return json(res, { not_found: 404, not_resumable: 409, busy: 409, bad_cwd: 400, even_terminal: 409, live_elsewhere: 409 }[e.code] ?? 500, { error: e.code ?? 'internal' });
         }
+      }
+      const hm = req.method === 'GET' && url.pathname.match(/^\/sessions\/([0-9a-f-]{36})\/history$/);
+      if (hm) { // D-06: no transcript content is ever logged here
+        const id = hm[1];
+        const file = sessions.get(id)?.transcriptPath ?? findTranscript(projectsDir, id);
+        const known = file || sessions.get(id) || sessions.prior.find((p) => p.id === id);
+        if (!known) return json(res, 404, { error: 'not_found' });
+        const lp = url.searchParams.get('limit'), bp = url.searchParams.get('before');
+        const limit = lp == null ? 200 : Math.min(500, Math.max(1, Math.floor(+lp) || 200));
+        if (bp !== null && !/^\d+$/.test(bp)) return json(res, 400, { error: 'bad_cursor' });
+        let all = [];
+        if (file) {
+          try { all = readHistory(file); } catch (e) { return e.code === 'too_large' ? json(res, 413, { error: 'too_large' }) : json(res, 200, { id, lines: [], before: null }); }
+        }
+        const end = bp === null ? all.length : Math.min(+bp, all.length);
+        const start = Math.max(0, end - limit);
+        return json(res, 200, { id, lines: all.slice(start, end), before: start > 0 ? start : null });
       }
       json(res, 404, { error: 'not_found' });
     } catch {

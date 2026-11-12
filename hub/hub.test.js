@@ -411,14 +411,15 @@ test('discovery', () => {
   fs.utimesSync(old, t, t);
   const dir = path.join(home, 'projects');
   const r = discoverExternal(dir, { ownedIds: new Set() });
-  assert.deepEqual(r.map((x) => x.id).sort(), [UA, UB]);
+  assert.deepEqual(r.map((x) => x.id).sort(), [UA, UB, UC]);
+  assert.deepEqual(r.filter((x) => x.active).map((x) => x.id).sort(), [UA, UB]);
   assert.equal(r.find((x) => x.id === UA).label, 'Terminal');
   const b = r.find((x) => x.id === UB);
   assert.equal(b.label, 'Even Terminal/SDK');
   assert.equal(b.title, 'Newest title');
   assert.equal(b.cwd, '/home/user/proj');
-  assert.deepEqual(discoverExternal(dir, { ownedIds: new Set([UA]) }).map((x) => x.id), [UB]);
-  assert.ok(discoverExternal(dir, { ownedIds: new Set(), liveIds: new Set([UC]) }).some((x) => x.id === UC));
+  assert.deepEqual(discoverExternal(dir, { ownedIds: new Set([UA]) }).map((x) => x.id).sort(), [UB, UC]);
+  assert.ok(discoverExternal(dir, { ownedIds: new Set(), liveIds: new Set([UC]) }).find((x) => x.id === UC).active);
 });
 
 test('external in hub', async () => {
@@ -452,6 +453,108 @@ test('hub session chat', async () => {
     fs.writeFileSync(path.join(home, 'projects', '-x', `${id}.jsonl`), lines[3] + '\n' + lines[6] + '\n');
     await waitFor(() => h.sessions.get(id).log.since(0).events.some((e) => e.kind === 'chat' && e.text === "I'll list the files."), 4000);
     assert.ok(!h.sessions.list().some((s) => s.id === id && s.source === 'external'));
+  } finally { h.close(); }
+});
+
+// ---- plan 05-04: history, summary, noise ----
+import { readHistory, summaryOf, isNoise } from './transcript.js';
+const histOf = async (b, id, q = '', headers = {}) => { const r = await fetch(`${b}/sessions/${id}/history${q}`, { headers }); return { status: r.status, j: await r.json() }; };
+
+test('history readHistory matches parseLine', () => {
+  const f = path.join(tmp(), 'h.jsonl');
+  fs.writeFileSync(f, fixture + 'garbage\n\n');
+  const h = readHistory(f);
+  const want = lines.flatMap((l) => parseLine(JSON.parse(l)));
+  assert.equal(h.length, want.length);
+  h.forEach((m, i) => assert.deepEqual(m, { i, ...want[i] }));
+});
+
+test('history paging for stopped prior session after restart', async () => {
+  const { home, put } = mkHome();
+  const dir = rdir();
+  const id = crypto.randomUUID();
+  put('-p', id, fixture);
+  fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify([{ id, cwd: tmp(), state: 'running', source: 'hub', pid: 0, startedAt: new Date().toISOString() }]));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: dir, claudeHome: home, killOnClose: true });
+  const b = `http://127.0.0.1:${h.port}`;
+  try {
+    const all = await histOf(b, id);
+    assert.equal(all.j.lines.length, 4);
+    assert.equal(all.j.before, null);
+    const p1 = await histOf(b, id, '?limit=2');
+    assert.deepEqual(p1.j.lines.map((l) => l.i), [2, 3]);
+    assert.equal(p1.j.before, 2);
+    const p2 = await histOf(b, id, '?limit=2&before=2');
+    assert.deepEqual(p2.j.lines.map((l) => l.i), [0, 1]);
+    assert.equal(p2.j.before, null);
+    assert.equal((await histOf(b, id, '?before=x')).status, 400);
+    const l = (await (await fetch(`${b}/sessions`)).json()).sessions.find((s) => s.id === id);
+    assert.equal(l.summary, 'List repo files'); // ai-title wins
+    assert.equal(l.lastActivity, new Date(fs.statSync(path.join(home, 'projects', '-p', `${id}.jsonl`)).mtimeMs).toISOString());
+  } finally { h.close(); }
+});
+
+test('history dormant external, 404s, bearer', async () => {
+  const { home, put } = mkHome();
+  const u2 = JSON.stringify({ type: 'user', message: { role: 'user', content: 'second prompt' } }) + '\n';
+  const f = put('-a', UA, fixture + u2);
+  const t = (Date.now() - 3 * 86400e3) / 1000;
+  fs.utimesSync(f, t, t);
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: rdir(), claudeHome: home, killOnClose: true });
+  const b = `http://127.0.0.1:${h.port}`;
+  try {
+    assert.equal((await histOf(b, UA)).j.lines.length, 5);
+    assert.equal(h.sessions.get(UA).tailer, undefined); // dormant: no tailer
+    const l = (await (await fetch(`${b}/sessions`)).json()).sessions.find((s) => s.id === UA);
+    assert.equal(l.noise, false);
+    assert.equal((await histOf(b, crypto.randomUUID())).status, 404);
+    assert.equal((await fetch(`${b}/sessions/not-a-uuid/history`)).status, 404);
+    put('-a', UA, fixture); // touch: next scan attaches a tailer
+    await waitFor(() => h.sessions.get(UA).tailer, 7000);
+  } finally { h.close(); }
+  const r = await fetch(`${tb}/sessions/${UA}/history`);
+  assert.equal(r.status, 401);
+});
+
+test('history live chat index matches history', async () => {
+  const { home } = mkHome();
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: rdir(), claudeHome: home, killOnClose: true });
+  try {
+    const { id } = await (await fetch(`http://127.0.0.1:${h.port}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: tmp() }) })).json();
+    const f = path.join(home, 'projects', '-x', `${id}.jsonl`);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, lines[0] + '\n' + lines[3] + '\n' + lines[6] + '\n');
+    await waitFor(() => h.sessions.get(id).log.since(0).events.filter((e) => e.kind === 'chat').length >= 2, 4000);
+    const hist = readHistory(f);
+    const chats = h.sessions.get(id).log.since(0).events.filter((e) => e.kind === 'chat');
+    for (const c of chats) assert.equal(hist[c.i].text, c.text);
+    assert.deepEqual(chats.map((c) => c.i), chats.map((_, k) => k));
+  } finally { h.close(); }
+});
+
+test('summaryOf and isNoise', () => {
+  assert.equal(summaryOf({ aiTitle: 'T', firstPrompt: 'p' }), 'T');
+  assert.equal(summaryOf({ firstPrompt: ' a\n b ', lastAssistant: 'z' }), 'a b');
+  assert.equal(summaryOf({ lastAssistant: 'z' }), 'z');
+  const s = summaryOf({ firstPrompt: 'x'.repeat(200) });
+  assert.equal(s.length, 80);
+  assert.ok(s.endsWith('\u2026'));
+  const now = Date.now(), old = now - 2 * 3600e3;
+  assert.equal(isNoise({ state: 'running', entrypoint: 'sdk-cli', userTurns: 0, lastActivityMs: old, now }), false);
+  assert.equal(isNoise({ state: 'external', entrypoint: 'sdk-cli', userTurns: 5, lastActivityMs: now, now }), true);
+  assert.equal(isNoise({ state: 'stopped', entrypoint: 'cli', userTurns: 1, lastActivityMs: old, now }), true);
+  assert.equal(isNoise({ state: 'stopped', entrypoint: 'cli', userTurns: 2, lastActivityMs: old, now }), false);
+  assert.equal(isNoise({ state: 'stopped', entrypoint: 'cli', userTurns: 9, lastActivityMs: now - 8 * 86400e3, now }), true);
+});
+
+test('sdk-cli external listed as noise', async () => {
+  const { home, put } = mkHome();
+  put('-q', UB, fixture.replaceAll('"entrypoint":"cli"', '"entrypoint":"sdk-cli"'));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: rdir(), claudeHome: home, killOnClose: true });
+  try {
+    const l = (await (await fetch(`http://127.0.0.1:${h.port}/sessions`)).json()).sessions.find((s) => s.id === UB);
+    assert.equal(l.noise, true);
+    assert.equal(l.entrypoint, 'sdk-cli');
   } finally { h.close(); }
 });
 

@@ -84,15 +84,72 @@ export function findTranscript(projectsDir, id) {
 
 export const labelFor = (e) => ({ cli: 'Terminal', 'sdk-ts': 'Even Terminal/SDK', 'sdk-cli': 'claude -p', 'claude-desktop': 'Desktop' })[e] ?? 'Other';
 
-function edge(file, size, head) {
-  const n = Math.min(size, 65536);
+function edge(file, size, head, max = 65536) {
+  const n = Math.min(size, max);
   const buf = Buffer.alloc(n);
   const fd = fs.openSync(file, 'r');
   try { fs.readSync(fd, buf, 0, n, head ? 0 : size - n); } finally { fs.closeSync(fd); }
   return buf.toString('utf8').split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 }
 
-export function discoverExternal(projectsDir, { ownedIds = new Set(), maxAgeMs = 30 * 60 * 1000, liveIds = new Set() } = {}) {
+// D-06: whole-file read per request. ponytail: cap 64 MB, upgrade to a reverse reader if transcripts outgrow it.
+// Same skip/parse rules as Tailer, so index i matches live chat events.
+const MAX_HISTORY = 64 << 20;
+export function readHistory(file) {
+  if (fs.statSync(file).size > MAX_HISTORY) throw Object.assign(new Error('too_large'), { code: 'too_large' });
+  const out = [];
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    let o;
+    try { o = JSON.parse(line); } catch { continue; }
+    for (const m of parseLine(o)) out.push({ i: out.length, ...m });
+  }
+  return out;
+}
+
+// D-08: per-file facts for the list, cached by size+mtime so the 5 s scan and /sessions stay cheap
+const described = new Map();
+export function describe(file) {
+  try {
+    const st = fs.statSync(file);
+    const hit = described.get(file);
+    if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.d;
+    // ponytail: files > 128 KB count user turns from the two 64 KB edges only (approximate); upgrade to a full scan if it matters
+    const small = st.size <= 131072;
+    const head = edge(file, st.size, true, small ? st.size : 65536);
+    const tail = small ? head : edge(file, st.size, false);
+    const all = small ? head : [...head, ...tail];
+    const msgs = all.flatMap(parseLine);
+    const users = msgs.filter((m) => m.role === 'user');
+    const t = tail.findLast((o) => o.type === 'ai-title' && o.aiTitle);
+    const lp = tail.findLast((o) => o.type === 'last-prompt' && o.lastPrompt);
+    const d = {
+      entrypoint: (tail.findLast((o) => o.entrypoint) ?? head.findLast((o) => o.entrypoint))?.entrypoint ?? null,
+      firstEntrypoint: head.find((o) => o.entrypoint)?.entrypoint ?? null,
+      cwd: head.find((o) => o.cwd)?.cwd ?? '',
+      aiTitle: t?.aiTitle ?? '', lastPrompt: lp?.lastPrompt ?? '',
+      firstPrompt: users[0]?.text ?? '',
+      lastAssistant: msgs.findLast((m) => m.role === 'assistant' && !m.tool)?.text ?? '',
+      userTurns: users.length, mtimeMs: st.mtimeMs,
+    };
+    described.set(file, { size: st.size, mtimeMs: st.mtimeMs, d });
+    return d;
+  } catch { return null; }
+}
+
+export function summaryOf(d) {
+  const t = String(d?.aiTitle || d?.firstPrompt || d?.lastAssistant || '').replace(/\s+/g, ' ').trim();
+  return t.length > 80 ? t.slice(0, 79) + '\u2026' : t;
+}
+
+// noise: never while the session is live; else sdk-cli (`claude -p`), a barely-used session idle > 1 h, or anything idle > 7 days
+export function isNoise({ state, entrypoint, userTurns = 0, lastActivityMs, now = Date.now() }) {
+  if (state === 'running' || state === 'waiting' || state === 'starting') return false;
+  const idle = lastActivityMs ? now - lastActivityMs : 0;
+  return entrypoint === 'sdk-cli' || (userTurns < 2 && idle > 3600e3) || idle > 7 * 86400e3;
+}
+
+export function discoverExternal(projectsDir, { ownedIds = new Set(), maxAgeMs = 7 * 86400e3, activeMs = 30 * 60 * 1000, liveIds = new Set() } = {}) {
   const out = [];
   let dirs = [];
   try { dirs = fs.readdirSync(projectsDir); } catch { return out; }
@@ -105,13 +162,12 @@ export function discoverExternal(projectsDir, { ownedIds = new Set(), maxAgeMs =
       const file = path.join(projectsDir, d, name);
       try {
         const st = fs.statSync(file);
-        if (Date.now() - st.mtimeMs > maxAgeMs && !liveIds.has(id)) continue;
-        const headEdge = edge(file, st.size, true);
-        const first = headEdge.find((o) => o.entrypoint);
-        const last = edge(file, st.size, false);
-        const entrypoint = (last.findLast((o) => o.entrypoint) ?? headEdge.findLast((o) => o.entrypoint))?.entrypoint ?? null;
-        const t = last.findLast((o) => o.type === 'ai-title' && o.aiTitle) ?? last.findLast((o) => o.type === 'last-prompt' && o.lastPrompt);
-        out.push({ id, transcriptPath: file, cwd: first?.cwd ?? '', label: labelFor(first?.entrypoint), entrypoint, title: t?.aiTitle ?? t?.lastPrompt ?? '', mtimeMs: st.mtimeMs });
+        const live = liveIds.has(id);
+        if (Date.now() - st.mtimeMs > maxAgeMs && !live) continue;
+        const x = describe(file);
+        if (!x) continue;
+        out.push({ id, transcriptPath: file, cwd: x.cwd, label: labelFor(x.firstEntrypoint), entrypoint: x.entrypoint, title: x.aiTitle || x.lastPrompt,
+          mtimeMs: st.mtimeMs, active: Date.now() - st.mtimeMs <= activeMs || live });
       } catch {}
     }
   }

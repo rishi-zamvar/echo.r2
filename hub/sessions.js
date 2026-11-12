@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { execFile, execFileSync } from 'node:child_process';
 import { EventLog } from './eventlog.js';
 import { load, save } from './store.js';
-import { Tailer, parseLine, findTranscript, latestEntrypoint, liveReferences } from './transcript.js';
+import { Tailer, parseLine, findTranscript, latestEntrypoint, liveReferences, describe, summaryOf, isNoise } from './transcript.js';
 
 export function scrubEnv(env) {
   return Object.fromEntries(Object.entries(env).filter(([k, v]) => v != null && !/^CLAUDE/i.test(k)));
@@ -111,13 +111,14 @@ export class Sessions {
   }
 
   // ponytail: externals are never persisted; discovery rebuilds them
-  #persist() { save(this.file, this.list().filter((s) => s.source === 'hub')); }
+  #persist() { save(this.file, this.#base().filter((s) => s.source === 'hub')); }
 
   // chat events from the transcript; hub sessions poll until claude has created the file
   #tail(s, file) {
     s.caughtUp = false;
+    s.chatIndex = 0; // same parse order as readHistory, so live i == history i
     s.tailer = new Tailer(file, (o) => {
-      for (const m of parseLine(o)) s.log.append('chat', m);
+      for (const m of parseLine(o)) s.log.append('chat', { ...m, i: s.chatIndex++ });
       if (s.source === 'external' && s.caughtUp) this.#extTurn(s, o);
     }).start();
     s.caughtUp = true; // catch-up (first poll) never alerts
@@ -147,16 +148,19 @@ export class Sessions {
     s.findTimer = t;
   }
 
-  addExternal({ id, cwd, label, title, transcriptPath, entrypoint }) {
+  addExternal({ id, cwd, label, title, transcriptPath, entrypoint, active = true }) {
     const s = this.get(id);
     if (s) {
-      if (s.source === 'external') Object.assign(s, { label, title, entrypoint, cwd: cwd || s.cwd, discovered: true });
+      if (s.source === 'external') {
+        Object.assign(s, { label, title, entrypoint, cwd: cwd || s.cwd, discovered: true });
+        if (active && !s.tailer) this.#tail(s, transcriptPath);
+      }
       return;
     }
     const e = { id, cwd, pid: 0, state: 'external', source: 'external', label, title, entrypoint, transcriptPath, discovered: true,
       startedAt: new Date().toISOString(), log: new EventLog(), pty: null };
     this.#map.set(id, e);
-    this.#tail(e, transcriptPath);
+    if (active) this.#tail(e, transcriptPath); // dormant externals are listed without a tailer
   }
 
   pruneExternals(seen) {
@@ -310,10 +314,20 @@ export class Sessions {
 
   get(id) { return this.#map.get(id); }
 
-  list() {
-    const live = [...this.#map.values()].map(({ id, cwd, pid, state, source, startedAt, label, title }) => ({ id, cwd, pid, state, source, startedAt, label, title }));
+  #base() {
+    const live = [...this.#map.values()].map(({ id, cwd, pid, state, source, startedAt, label, title, entrypoint, transcriptPath, tailer }) => ({ id, cwd, pid, state, source, startedAt, label, title, entrypoint, file: transcriptPath ?? tailer?.file }));
     const ids = new Set(live.map((s) => s.id));
     return [...this.prior.filter((p) => p.source !== 'external' && !ids.has(p.id)), ...live];
+  }
+
+  list() {
+    return this.#base().map(({ file, ...r }) => {
+      const d = describe(file ?? findTranscript(this.projectsDir, r.id));
+      const lastActivityMs = d?.mtimeMs ?? (Date.parse(r.startedAt) || 0);
+      const entrypoint = r.entrypoint ?? d?.entrypoint ?? null;
+      return { ...r, entrypoint, summary: summaryOf(d) || r.title || '', lastActivity: lastActivityMs ? new Date(lastActivityMs).toISOString() : null,
+        noise: isNoise({ state: r.state, entrypoint, userTurns: d?.userTurns ?? 0, lastActivityMs }) };
+    });
   }
 
   // D-19: guard, then one per-session promise chain so pastes never interleave
