@@ -51,7 +51,10 @@ Progress: [████████░░] 77%
 
 ### Pending Todos
 
-None yet.
+- Phase 3: sessions started in an untrusted folder sit at Claude's folder-trust dialog (default = exit). Surface a `needs_trust` hint (detect dialog text in PTY output) and let the user answer it from the Terminal view; never auto-edit ~/.claude.json.
+- iPhone Tailscale key expires 2026-11-24 — disable expiry for iphone-14-pro-max.
+- Login autostart of the Mac hub not yet proven — after next real login check `curl -s 127.0.0.1:8790/health`.
+- Plans 01-05, 01-06, 02-07 PARKED until PC returns.
 
 ### Blockers/Concerns
 
