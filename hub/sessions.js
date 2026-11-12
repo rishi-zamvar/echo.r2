@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { execFile, execFileSync } from 'node:child_process';
 import { EventLog } from './eventlog.js';
 import { load, save } from './store.js';
-import { Tailer, parseLine, findTranscript } from './transcript.js';
+import { Tailer, parseLine, findTranscript, latestEntrypoint, liveReferences } from './transcript.js';
 
 export function scrubEnv(env) {
   return Object.fromEntries(Object.entries(env).filter(([k, v]) => v != null && !/^CLAUDE/i.test(k)));
@@ -70,8 +70,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export class Sessions {
   #map = new Map();
   #spawned = new Set(); // pids this hub process spawned this boot
-  constructor({ claudeCmd, epoch, dataDir, projectsDir, extraArgs = () => [], extraEnv = {}, onAlert = () => {} }) {
-    Object.assign(this, { claudeCmd, epoch, dataDir, projectsDir, extraArgs, extraEnv, onAlert });
+  constructor({ claudeCmd, epoch, dataDir, projectsDir, extraArgs = () => [], extraEnv = {}, onAlert = () => {}, stallMs = 120000 }) {
+    Object.assign(this, { claudeCmd, epoch, dataDir, projectsDir, extraArgs, extraEnv, onAlert, stallMs });
     this.file = path.join(dataDir, 'sessions.json');
     this.prior = load(this.file, []);
     let changed = false, swept = 0;
@@ -115,7 +115,27 @@ export class Sessions {
 
   // chat events from the transcript; hub sessions poll until claude has created the file
   #tail(s, file) {
-    s.tailer = new Tailer(file, (o) => { for (const m of parseLine(o)) s.log.append('chat', m); }).start();
+    s.caughtUp = false;
+    s.tailer = new Tailer(file, (o) => {
+      for (const m of parseLine(o)) s.log.append('chat', m);
+      if (s.source === 'external' && s.caughtUp) this.#extTurn(s, o);
+    }).start();
+    s.caughtUp = true; // catch-up (first poll) never alerts
+  }
+
+  // D-02: external alerts come from the transcript alone
+  #extTurn(s, o) {
+    clearTimeout(s.stallTimer);
+    if (o?.type !== 'assistant') return;
+    const stop = o.message?.stop_reason;
+    if (stop === 'end_turn') {
+      s.lastStop = (Array.isArray(o.message.content) ? o.message.content : []).filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
+      clearTimeout(s.stopTimer);
+      s.stopTimer = setTimeout(() => this.#alert(s, 'done'), STOP_DEBOUNCE_MS);
+    } else if (stop === 'tool_use') {
+      s.stallTimer = setTimeout(() => { s.lastMessage = 'may need you'; this.#alert(s, 'waiting'); }, this.stallMs);
+      s.stallTimer.unref();
+    }
   }
 
   #findTail(s) {
@@ -127,13 +147,13 @@ export class Sessions {
     s.findTimer = t;
   }
 
-  addExternal({ id, cwd, label, title, transcriptPath }) {
+  addExternal({ id, cwd, label, title, transcriptPath, entrypoint }) {
     const s = this.get(id);
     if (s) {
-      if (s.source === 'external') Object.assign(s, { label, title, cwd: cwd || s.cwd, discovered: true });
+      if (s.source === 'external') Object.assign(s, { label, title, entrypoint, cwd: cwd || s.cwd, discovered: true });
       return;
     }
-    const e = { id, cwd, pid: 0, state: 'external', source: 'external', label, title, transcriptPath, discovered: true,
+    const e = { id, cwd, pid: 0, state: 'external', source: 'external', label, title, entrypoint, transcriptPath, discovered: true,
       startedAt: new Date().toISOString(), log: new EventLog(), pty: null };
     this.#map.set(id, e);
     this.#tail(e, transcriptPath);
@@ -141,14 +161,14 @@ export class Sessions {
 
   pruneExternals(seen) {
     for (const s of this.#map.values()) {
-      if (s.discovered && !seen.has(s.id)) { s.tailer?.stop(); this.#map.delete(s.id); }
+      if (s.discovered && !seen.has(s.id)) { s.tailer?.stop(); clearTimeout(s.stopTimer); clearTimeout(s.stallTimer); this.#map.delete(s.id); }
     }
   }
 
   ownedIds() { return new Set([...this.#map.values()].filter((s) => s.source === 'hub').map((s) => s.id)); }
 
   close() {
-    for (const s of this.#map.values()) { s.tailer?.stop(); clearInterval(s.findTimer); }
+    for (const s of this.#map.values()) { s.tailer?.stop(); clearInterval(s.findTimer); clearTimeout(s.stopTimer); clearTimeout(s.stallTimer); }
   }
 
   start({ cwd, prompt }) {
@@ -206,6 +226,12 @@ export class Sessions {
 
   // SESS-06 resume (exited / stopped hub session) and EXT-02 takeover (idle external session); same id kept
   resume(id, { takeover = false, liveIds = new Set() } = {}) {
+    // D-03: never a second writer on Even Terminal's or any other live process's session; unknown = refuse
+    const guard = (entry) => {
+      if (entry === 'sdk-ts') throw fail('even_terminal');
+      const refs = liveReferences(id, this.#spawned);
+      if (refs === null || refs.length || liveIds.has(id)) throw fail('live_elsewhere');
+    };
     let s = this.get(id);
     if (!s) {
       const p = this.prior.find((x) => x.id === id && x.source === 'hub');
@@ -213,13 +239,18 @@ export class Sessions {
       if (takeover || (p.state !== 'stopped' && p.state !== 'exited')) throw fail('not_resumable');
       s = { id, cwd: p.cwd, pid: 0, state: 'stopped', source: 'hub', startedAt: p.startedAt, title: p.title,
         log: new EventLog(), pty: null, cols: 120, rows: 30, q: Promise.resolve() };
+      guard(latestEntrypoint(findTranscript(this.projectsDir, id)));
     } else if (s.source === 'external') {
-      if (!takeover) throw fail('not_resumable');
       const f = s.transcriptPath ?? findTranscript(this.projectsDir, id);
+      guard(s.entrypoint ?? latestEntrypoint(f));
+      if (!takeover) throw fail('not_resumable');
       let mtime = 0;
       try { mtime = fs.statSync(f).mtimeMs; } catch {}
       if (liveIds.has(id) || Date.now() - mtime < 60000) throw fail('busy'); // D-08 two-writer guard
-    } else if (takeover || s.state !== 'exited') throw fail('not_resumable');
+    } else {
+      if (takeover || s.state !== 'exited') throw fail('not_resumable');
+      guard(latestEntrypoint(findTranscript(this.projectsDir, id)));
+    }
     if (typeof s.cwd !== 'string' || !path.isAbsolute(s.cwd) || !fs.existsSync(s.cwd) || !fs.statSync(s.cwd).isDirectory()) throw fail('bad_cwd');
     const wasExternal = s.source === 'external';
     if (wasExternal) { s.source = 'hub'; delete s.discovered; delete s.label; Object.assign(s, { pid: 0, cols: 120, rows: 30, q: Promise.resolve() }); }

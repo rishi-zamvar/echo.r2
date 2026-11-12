@@ -23,6 +23,7 @@ export async function startHub({
   hookPort = +process.env.ECHO_HOOK_PORT || 8791,
   killOnClose = false,
   spawnEnv = {},
+  stallMs,
   claudeHome = process.env.ECHO_CLAUDE_HOME || path.join(os.homedir(), '.claude'),
   tailscale = defaultTailscale(),
   tailnetPort = port,
@@ -45,7 +46,7 @@ export async function startHub({
   const push = new Push({ apns: config.apns ?? {}, dataDir, devices, send: apnsSend, cooldownMs: apnsCooldownMs });
   const hooksFile = path.join(dataDir, 'hub-hooks.json');
   const projectsDir = path.join(claudeHome, 'projects');
-  const sessions = new Sessions({ claudeCmd, epoch, dataDir, projectsDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret }, onAlert: (s, kind) => push.alert(s, kind) });
+  const sessions = new Sessions({ claudeCmd, epoch, dataDir, projectsDir, extraArgs: () => ['--settings', hooksFile], extraEnv: { ...spawnEnv, ECHO_SECRET: secret }, onAlert: (s, kind) => push.alert(s, kind), stallMs });
   const hookServer = await startHookServer({ port: hookPort, secret, extSecret: config.hookSecret,
     onHook: (p) => sessions.hook(p),
     onExtHook: (p) => { if (p && typeof p.session_id === 'string' && sessions.ownedIds().has(p.session_id)) return; sessions.hook(p); } });
@@ -210,11 +211,13 @@ export async function startHub({
         if (cwd === undefined) return json(res, 404, { error: 'not_found' });
         if (!inRoots(cwd, config.roots)) return json(res, 400, { error: 'bad_cwd' });
         try {
-          if (what === 'resume') sessions.resume(id); else sessions.takeover(id, liveSessionIds(claudeHome));
+          const liveIds = liveSessionIds(claudeHome);
+          if (what === 'resume') sessions.resume(id, { liveIds }); else sessions.takeover(id, liveIds);
           console.log(`${what === 'resume' ? 'resumed' : 'took over'} ${id.slice(0, 8)}`);
           return json(res, 200, { ok: true, id });
         } catch (e) {
-          return json(res, { not_found: 404, not_resumable: 409, busy: 409, bad_cwd: 400 }[e.code] ?? 500, { error: e.code ?? 'internal' });
+          if (e.code === 'even_terminal' || e.code === 'live_elsewhere') console.log(`refused ${what} ${id.slice(0, 8)} ${e.code}`);
+          return json(res, { not_found: 404, not_resumable: 409, busy: 409, bad_cwd: 400, even_terminal: 409, live_elsewhere: 409 }[e.code] ?? 500, { error: e.code ?? 'internal' });
         }
       }
       json(res, 404, { error: 'not_found' });

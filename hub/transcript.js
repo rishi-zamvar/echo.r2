@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const short = (s) => String(s).replace(/\s*\n\s*/g, ' ').slice(0, 80);
@@ -105,10 +106,12 @@ export function discoverExternal(projectsDir, { ownedIds = new Set(), maxAgeMs =
       try {
         const st = fs.statSync(file);
         if (Date.now() - st.mtimeMs > maxAgeMs && !liveIds.has(id)) continue;
-        const first = edge(file, st.size, true).find((o) => o.entrypoint);
+        const headEdge = edge(file, st.size, true);
+        const first = headEdge.find((o) => o.entrypoint);
         const last = edge(file, st.size, false);
+        const entrypoint = (last.findLast((o) => o.entrypoint) ?? headEdge.findLast((o) => o.entrypoint))?.entrypoint ?? null;
         const t = last.findLast((o) => o.type === 'ai-title' && o.aiTitle) ?? last.findLast((o) => o.type === 'last-prompt' && o.lastPrompt);
-        out.push({ id, transcriptPath: file, cwd: first?.cwd ?? '', label: labelFor(first?.entrypoint), title: t?.aiTitle ?? t?.lastPrompt ?? '', mtimeMs: st.mtimeMs });
+        out.push({ id, transcriptPath: file, cwd: first?.cwd ?? '', label: labelFor(first?.entrypoint), entrypoint, title: t?.aiTitle ?? t?.lastPrompt ?? '', mtimeMs: st.mtimeMs });
       } catch {}
     }
   }
@@ -129,4 +132,28 @@ export function liveSessionIds(claudeHome) {
     }
   } catch {}
   return ids;
+}
+
+// latest entrypoint recorded in a transcript (tail edge first, else head edge); null if unreadable
+export function latestEntrypoint(file) {
+  try {
+    const size = fs.statSync(file).size;
+    return (edge(file, size, false).findLast((o) => o.entrypoint) ?? edge(file, size, true).findLast((o) => o.entrypoint))?.entrypoint ?? null;
+  } catch { return null; }
+}
+
+// D-03: pids of any process whose command line mentions this session id; null = unknown (callers fail closed)
+export function liveReferences(id, excludePids = new Set()) {
+  if (process.platform === 'win32') return null;
+  try {
+    const out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8', maxBuffer: 16 << 20 });
+    const pids = [];
+    for (const l of out.split('\n')) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(l);
+      if (!m) continue;
+      const pid = +m[1];
+      if (pid !== process.pid && !excludePids.has(pid) && m[2].includes(id)) pids.push(pid);
+    }
+    return pids;
+  } catch { return null; }
 }

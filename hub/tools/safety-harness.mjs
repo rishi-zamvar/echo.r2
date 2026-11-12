@@ -15,6 +15,9 @@ const dataDir = path.join(root, 'data'), claudeHome = path.join(root, 'claude'),
 for (const d of [dataDir, claudeHome, work, path.join(root, 'bin')]) fs.mkdirSync(d, { recursive: true });
 fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({ roots: [fs.realpathSync(root)] }));
 const ET_ID = crypto.randomUUID();
+// D-03: ET_ID's transcript says entrypoint sdk-ts, so takeover/resume must be refused with 409 even_terminal
+fs.mkdirSync(path.join(claudeHome, 'projects', '-et'), { recursive: true });
+fs.writeFileSync(path.join(claudeHome, 'projects', '-et', `${ET_ID}.jsonl`), JSON.stringify({ type: 'user', entrypoint: 'sdk-ts', cwd: work, message: { content: 'hi' } }) + '\n');
 const log = path.join(root, 'et.log');
 const etScript = path.join(root, 'bin', 'even-terminal'); // command line contains bin/even-terminal, like the real one
 
@@ -54,7 +57,10 @@ try {
       const r = await fetch(`${b}/sessions`, { method: 'POST', body: JSON.stringify({ cwd: work }) });
       const { id } = await r.json();
       await fetch(`${b}/sessions/${id}/stop`, { method: 'POST' });
-      for (const a of ['takeover', 'resume']) await fetch(`${b}/sessions/${ET_ID}/${a}`, { method: 'POST' });
+      for (const a of ['takeover', 'resume']) {
+        const x = await fetch(`${b}/sessions/${ET_ID}/${a}`, { method: 'POST' });
+        if (x.status !== 409 || (await x.json()).error !== 'even_terminal') { console.log(`safety FAIL ${a} ${x.status}`); process.exit(1); }
+      }
     } finally { h.close(); }
     await sleep(50);
     const killed = lines().filter((l) => l[0] === 'exit' && (l[2] === 'SIGKILL' || l[2] === 'SIGTERM'));

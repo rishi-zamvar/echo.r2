@@ -837,6 +837,53 @@ test('plist dry run', { skip: process.platform !== 'darwin' }, () => {
   assert.equal(fs.existsSync(plist), before);
 });
 
+test('discovery entrypoint is the latest one', () => {
+  const { home, put } = mkHome();
+  put('-a', UA, fixture + JSON.stringify({ type: 'user', entrypoint: 'sdk-ts', message: { content: 'x' } }) + '\n');
+  assert.equal(discoverExternal(path.join(home, 'projects'))[0].entrypoint, 'sdk-ts');
+});
+
+test('takeover/resume guards (D-03)', posix, async () => {
+  const { home, put } = mkHome();
+  const cwd = fs.realpathSync(tmp());
+  const old = (Date.now() - 300e3) / 1000; // idle past the busy window, still discoverable
+  const fx = (ep) => fixture.replaceAll('"entrypoint":"cli"', `"entrypoint":"${ep}"`).replaceAll('/home/user/proj', cwd);
+  const fa = put('-a', UA, fx('sdk-ts'));
+  const fb = put('-b', UB, fx('cli'));
+  for (const f of [fa, fb]) fs.utimesSync(f, old, old);
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: rdir(), claudeHome: home, killOnClose: true });
+  const b = `http://127.0.0.1:${h.port}`;
+  const err = async (id, what) => { const r = await rpost(b, id, what); return [r.status, (await r.json()).error]; };
+  let child;
+  try {
+    assert.deepEqual(await err(UA, 'takeover'), [409, 'even_terminal']); // idle 5 min, still refused
+    assert.deepEqual(await err(UA, 'resume'), [409, 'even_terminal']);
+    child = spawn(process.execPath, [fake, '--resume', UB], { detached: true, stdio: 'ignore' });
+    await sleep(300);
+    assert.deepEqual(await err(UB, 'takeover'), [409, 'live_elsewhere']);
+    child.kill('SIGKILL');
+    await new Promise((r) => child.once('exit', r));
+    assert.equal((await rpost(b, UB, 'takeover')).status, 200);
+    // the hub's own resumed child does not count as a live reference
+    await waitFor(() => h.sessions.get(UB).state === 'running');
+    h.sessions.signal(UB, 'exit');
+  } finally { try { child.kill('SIGKILL'); } catch {} h.close(); }
+});
+
+test('resume of a stopped hub session last used by Even Terminal is refused', posix, async () => {
+  const { home, put } = mkHome();
+  const cwd = fs.realpathSync(tmp());
+  put('-a', UA, fixture.replaceAll('"entrypoint":"cli"', '"entrypoint":"sdk-ts"').replaceAll('/home/user/proj', cwd));
+  const dir = rdir();
+  fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify([{ id: UA, cwd, pid: 0, state: 'stopped', source: 'hub' }]));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: dir, claudeHome: home, killOnClose: true });
+  try {
+    const r = await rpost(`http://127.0.0.1:${h.port}`, UA, 'resume');
+    assert.equal(r.status, 409);
+    assert.equal((await r.json()).error, 'even_terminal');
+  } finally { h.close(); }
+});
+
 // ---- plan 04-01: push ----
 import crypto from 'node:crypto';
 import { makeJwt, apnsRequest, alertText } from './apns.js';
@@ -849,7 +896,7 @@ const b64u = (s) => Buffer.from(s, 'base64url');
 const TOK_A = 'ab'.repeat(32);
 const TOK_B = 'bc'.repeat(32);
 
-async function apnsHub({ seed, apnsCooldownMs } = {}) {
+async function apnsHub({ seed, apnsCooldownMs, claudeHome, stallMs } = {}) {
   const dir = tmp();
   const keyPath = path.join(dir, 'AuthKey_KID123.p8');
   fs.writeFileSync(keyPath, ecPem().pem, { mode: 0o600 });
@@ -868,7 +915,7 @@ async function apnsHub({ seed, apnsCooldownMs } = {}) {
     return next ?? { status: 200 };
   };
   const h = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true, hookPort: 0,
-    tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, whoisTtlMs: 0, apnsSend, apnsCooldownMs });
+    tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, whoisTtlMs: 0, apnsSend, apnsCooldownMs, claudeHome, stallMs });
   const t = `http://127.0.0.1:${await h.tailnetReady}`;
   return { h, dir, calls, script, base: `http://127.0.0.1:${h.port}`, tb: t, devicesFile: path.join(dir, 'devices.json') };
 }
@@ -1039,6 +1086,47 @@ test('external alert', async () => {
   } finally { a.h.close(); }
 });
 
+const asst = (stop, text = 'x') => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }], stop_reason: stop } }) + '\n';
+const extHub = async (initial, stallMs) => {
+  const { home, put } = mkHome();
+  const f = put('-x', UA, fixture + initial);
+  const a = await apnsHub({ seed: seedDev(), claudeHome: home, stallMs });
+  assert.equal(a.h.sessions.get(UA).source, 'external');
+  return { a, f };
+};
+
+test('external transcript: catch-up does not alert, end_turn does (once)', async () => {
+  const { a, f } = await extHub(asst('end_turn', 'old news'));
+  try {
+    await sleep(2200);
+    assert.equal(forSession(a, UA).length, 0);
+    fs.appendFileSync(f, asst('end_turn', 'All done'));
+    await waitFor(() => forSession(a, UA).length >= 1, 3000);
+    await sleep(2200);
+    assert.equal(forSession(a, UA).length, 1);
+    assert.equal(forSession(a, UA)[0].payload.aps.alert.body, 'All done');
+  } finally { a.h.close(); }
+});
+
+test('external transcript: tool_use stall alerts waiting once; later lines reset it', async () => {
+  const { a, f } = await extHub('', 300);
+  try {
+    fs.appendFileSync(f, asst('tool_use'));
+    await waitFor(() => forSession(a, UA).length >= 1, 3000);
+    await sleep(800);
+    assert.equal(forSession(a, UA).length, 1);
+    assert.equal(forSession(a, UA)[0].payload.aps.alert.body, 'may need you');
+    // a new line right after tool_use cancels the stall timer
+    const n = forSession(a, UA).length;
+    fs.appendFileSync(f, asst('tool_use'));
+    await sleep(100);
+    fs.appendFileSync(f, asst('end_turn', 'fin'));
+    await sleep(800);
+    assert.equal(a.h.sessions.get(UA).lastMessage, 'may need you');
+    assert.ok(forSession(a, UA).length <= n + 1);
+  } finally { a.h.close(); }
+});
+
 test('cooldown collapse', async () => {
   let clock = 0;
   const timers = [];
@@ -1126,7 +1214,7 @@ test('resume bad cwd', posix, async () => {
 test('takeover busy then ok', posix, async () => {
   const { home, put } = mkHome();
   const cwd = fs.realpathSync(tmp());
-  const f = put('-b', UB, fixture.replaceAll('"entrypoint":"cli"', '"entrypoint":"sdk-ts"').replaceAll('/home/user/proj', cwd));
+  const f = put('-b', UB, fixture.replaceAll('/home/user/proj', cwd));
   const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: rdir(), claudeHome: home, killOnClose: true });
   const b = `http://127.0.0.1:${h.port}`;
   try {
@@ -1141,7 +1229,7 @@ test('takeover busy then ok', posix, async () => {
     fs.writeFileSync(pf, JSON.stringify({ pid: process.pid, sessionId: UB }));
     r = await rpost(b, UB, 'takeover');
     assert.equal(r.status, 409);
-    assert.equal((await r.json()).error, 'busy');
+    assert.equal((await r.json()).error, 'live_elsewhere');
     fs.rmSync(pf);
     r = await rpost(b, UB, 'takeover');
     assert.equal(r.status, 200);
