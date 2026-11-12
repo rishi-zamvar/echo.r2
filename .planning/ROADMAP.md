@@ -99,7 +99,15 @@ Plans:
   4. After a hub restart, previously running sessions show as stopped and can be resumed with `claude --resume`.
   5. User can "Take over" an external session; the hub refuses while its transcript shows recent activity, otherwise resumes it inside the hub.
   6. One release script builds from XcodeGen `project.yml` and uploads to TestFlight.
-**Plans**: TBD
+**Plans**: 7 plans
+Plans:
+- [ ] 04-01-PLAN.md — hub/apns.js (JWT, env routing, 410 cleanup, retry), device push tokens, /devices/push(+test), hub-started push, cli test-push (NOTF-03, NOTF-05)
+- [ ] 04-02-PLAN.md — Finish / needs-input / exit alerts for hub + external sessions, 10 s per-session collapse (NOTF-01, NOTF-04)
+- [ ] 04-03-PLAN.md — Resume (stopped/exited) + Take over with busy guard, cli resume/takeover, deploy to live Mac hub (SESS-06, EXT-02)
+- [ ] 04-04-PLAN.md — App: aps-environment, AppDelegate token registration (env-tagged), foreground banner, tap deep link (NOTF-02, NOTF-03)
+- [ ] 04-05-PLAN.md — App: Resume / Take over in session detail, Settings Notifications card + Send test push (SESS-06, EXT-02, NOTF-03)
+- [ ] 04-06-PLAN.md — release.sh + ExportOptions.plist, build number from CURRENT_PROJECT_VERSION, AppIcon (APP-02)
+- [ ] 04-07-PLAN.md — CHECKPOINT: Rishi's Apple/disk/Tailscale prerequisites, APNs key on live hub, TestFlight upload, on-device checklist incl. Phase 3 items (all reqs)
 **UI hint**: yes
 **On-PC / on-device spikes**:
   - APNs JWT refresh rule; sandbox vs production token on a TestFlight build
@@ -112,4 +120,4 @@ Plans:
 | 1. Hub Session Engine | 4/6 | In Progress|  |
 | 2. Secure Hub & PC Install | 6/7 | In Progress|  |
 | 3. iOS App | 5/5 | Complete   | 2026-11-12 |
-| 4. Push, Recovery & Release | 0/TBD | Not started | - |
+| 4. Push, Recovery & Release | 0/7 | Planned | - |
