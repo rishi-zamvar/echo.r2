@@ -84,3 +84,16 @@ Also `deploy.ps1` and `uninstall.ps1`. Firewall rule `echo-hub` scoped to 100.64
 3. Execute 02-07 (Phase 2 PC checks).
 4. Disable key expiry for `zee-cloud`.
 5. Pair the phone against the PC hub.
+
+## Verified on Mac
+
+2026-11-11, SHA 500e625, host rishis-macbook-pro (100.125.215.102).
+
+- L1 PASS: LaunchAgent loaded, state running, RunAtLoad=true, KeepAlive=true. Minor: hub.log is 0644 (config.json, devices.json 0600). Login autostart not proven until next real login.
+- L2 PASS: kill -9, launchd restarted hub with new pid in 1 s.
+- L3 PASS: loopback and tailnet /health both gitSha 500e625; hub listens only on 127.0.0.1:8790, 127.0.0.1:8791, 100.125.215.102:8790 (no wildcard).
+- L4 PASS: 401 no token, 403 wrong code, 201 pair, 200 bearer, 404 tailnet /admin/devices, 403 loopback bad Origin, 403 code reuse, 401 after revoke; owner recorded; token absent from hub.log and devices.json.
+- L5 PARTIAL: launchd hub spawned real Claude in ~/Documents/Projects/echo.r2 (TCC and PATH OK) but Claude's one-time folder trust dialog blocked the "pong" and the hub CLI cannot answer it. Fix: run `claude` once in the folder and accept trust, then repeat `node hub/cli.js new <dir> "reply with the single word pong"`.
+- L6 PASS: settings.json equals backup apart from Stop/Notification hooks; `claude -p` works with hub down (4 s); re-install is byte-identical; `claude -p` with hub up appears as external.
+- L7 PASS: deploy.sh printed `deployed 500e625` = HEAD.
+- L8 PASS: KeyExpiry for the Mac is now 2027-05-11 (was 2026-11-20).
