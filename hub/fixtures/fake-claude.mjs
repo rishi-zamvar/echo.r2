@@ -3,8 +3,9 @@ import { spawn } from 'node:child_process';
 const a = process.argv.slice(2);
 if (a.includes('--version')) { console.log('fake-claude 0.0.0'); process.exit(0); }
 if (process.stdin.isTTY) process.stdin.setRawMode(true);
-const sid = a[a.indexOf('--session-id') + 1];
-process.stdout.write(`READY session=${sid}\r\n`);
+const resumed = a.includes('--resume');
+const sid = a[a.indexOf(resumed ? '--resume' : '--session-id') + 1];
+process.stdout.write(`READY session=${sid}${resumed ? ' resumed' : ''}\r\n`);
 let n = 0;
 setInterval(() => process.stdout.write(`tick ${++n}\r\n`), 100);
 process.stdin.on('data', (c) => {

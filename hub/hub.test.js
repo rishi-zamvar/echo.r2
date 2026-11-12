@@ -1017,3 +1017,106 @@ test('cooldown collapse', async () => {
   assert.equal(calls.length, 3);
   p.close();
 });
+
+// ---- plan 04-03: resume/takeover ----
+const rpost = (b, id, what) => fetch(`${b}/sessions/${id}/${what}`, { method: 'POST' });
+const termOf = (h, id) => h.sessions.get(id).log.since(0).events
+  .filter((e) => e.kind === 'term').map((e) => Buffer.from(e.data, 'base64').toString()).join('');
+
+test('resume exited in place', posix, async () => {
+  const id = await create();
+  await waitFor(() => st(id) === 'running');
+  const ws = new WebSocket(`${wsBase}/sessions/${id}/stream`);
+  const fr = frames(ws);
+  await open(ws);
+  assert.equal((await rpost(base, id, 'stop')).status, 200);
+  await waitFor(() => st(id) === 'exited');
+  const r = await rpost(base, id, 'resume');
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { ok: true, id });
+  await waitFor(() => fr.some((x) => x.kind === 'term' && Buffer.from(x.data, 'base64').toString().includes(`READY session=${id} resumed`)));
+  await waitFor(() => fr.some((x) => x.kind === 'state' && x.state === 'running'));
+  assert.equal(hub.sessions.get(id).source, 'hub');
+  const again = await rpost(base, id, 'resume');
+  assert.equal(again.status, 409);
+  assert.equal((await again.json()).error, 'not_resumable');
+  ws.close();
+  await rpost(base, id, 'stop');
+});
+
+test('resume after restart', posix, async () => {
+  const dir = rdir();
+  const cwd = tmp();
+  const id = crypto.randomUUID();
+  fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify([{ id, cwd, state: 'running', source: 'hub', pid: 0, startedAt: new Date().toISOString() }]));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true });
+  const b = `http://127.0.0.1:${h.port}`;
+  try {
+    const list = async () => (await (await fetch(`${b}/sessions`)).json()).sessions.filter((s) => s.id === id);
+    assert.equal((await list())[0].state, 'stopped');
+    assert.equal((await rpost(b, id, 'resume')).status, 200);
+    await waitFor(() => termOf(h, id).includes(`READY session=${id} resumed`));
+    const l = await list();
+    assert.equal(l.length, 1);
+    assert.equal(l[0].state, 'running');
+    const u = await rpost(b, crypto.randomUUID(), 'resume');
+    assert.equal(u.status, 404);
+    assert.equal((await u.json()).error, 'not_found');
+  } finally { h.close(); }
+});
+
+test('resume bad cwd', posix, async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ roots: [tmp()] }));
+  const id = crypto.randomUUID();
+  fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify([{ id, cwd: tmp(), state: 'stopped', source: 'hub', pid: 0, startedAt: new Date().toISOString() }]));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: dir, killOnClose: true });
+  try {
+    const r = await rpost(`http://127.0.0.1:${h.port}`, id, 'resume');
+    assert.equal(r.status, 400);
+    assert.equal((await r.json()).error, 'bad_cwd');
+    assert.equal(h.sessions.get(id), undefined);
+  } finally { h.close(); }
+});
+
+test('takeover busy then ok', posix, async () => {
+  const { home, put } = mkHome();
+  const cwd = fs.realpathSync(tmp());
+  const f = put('-b', UB, fixture.replaceAll('"entrypoint":"cli"', '"entrypoint":"sdk-ts"').replaceAll('/home/user/proj', cwd));
+  const h = await startHub({ port: 0, hookPort: 0, claudeCmd: [process.execPath, fake], dataDir: rdir(), claudeHome: home, killOnClose: true });
+  const b = `http://127.0.0.1:${h.port}`;
+  try {
+    assert.equal(h.sessions.get(UB).cwd, cwd);
+    let r = await rpost(b, UB, 'takeover');
+    assert.equal(r.status, 409);
+    assert.equal((await r.json()).error, 'busy');
+    const old = (Date.now() - 120000) / 1000;
+    fs.utimesSync(f, old, old);
+    fs.mkdirSync(path.join(home, 'sessions'), { recursive: true });
+    const pf = path.join(home, 'sessions', 'x.json');
+    fs.writeFileSync(pf, JSON.stringify({ pid: process.pid, sessionId: UB }));
+    r = await rpost(b, UB, 'takeover');
+    assert.equal(r.status, 409);
+    assert.equal((await r.json()).error, 'busy');
+    fs.rmSync(pf);
+    r = await rpost(b, UB, 'takeover');
+    assert.equal(r.status, 200);
+    const s = h.sessions.get(UB);
+    assert.equal(s.source, 'hub');
+    assert.notEqual(s.state, 'external');
+    await waitFor(() => termOf(h, UB).includes(`READY session=${UB} resumed`));
+    await waitFor(() => s.state === 'running');
+    const ws = new WebSocket(`ws://127.0.0.1:${h.port}/sessions/${UB}/stream`);
+    const fr = frames(ws);
+    await open(ws);
+    ws.send(JSON.stringify({ type: 'input', text: 'x' }));
+    await sleep(300);
+    assert.ok(!fr.some((x) => x.type === 'error' && x.code === 'read_only'));
+    ws.close();
+    h.sessions.pruneExternals(new Set());
+    assert.ok(h.sessions.get(UB));
+    r = await rpost(b, UB, 'takeover');
+    assert.equal(r.status, 409);
+    assert.equal((await r.json()).error, 'not_resumable');
+  } finally { h.close(); }
+});
