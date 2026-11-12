@@ -56,7 +56,7 @@ Plans:
 - [x] 02-03-PLAN.md — cwd allowlist + /sessions/roots, /hook/ext global-hook receiver, rotating hub.log (HUB-02, HUB-04)
 - [x] 02-04-PLAN.md — Mac install.sh/uninstall.sh/deploy.sh (launchd), hooks-merge.js, RUNBOOK (HUB-01, HUB-04)
 - [x] 02-05-PLAN.md — Windows install.ps1/uninstall.ps1/deploy.ps1, written UNVERIFIED (HUB-01, HUB-04)
-- [ ] 02-06-PLAN.md — Mac live install + checks L1-L8, key-expiry checkpoint (all reqs; human-verify)
+- [x] 02-06-PLAN.md — Mac live install + checks L1-L8, key-expiry checkpoint (all reqs; human-verify)
 - [ ] 02-07-PLAN.md — PARKED: PC verification via swe when zee-cloud returns
 **On-PC spikes**:
   - `tailscale whois --json` fields for the phone (user-owned vs tagged); firewall reachability from the phone
@@ -104,6 +104,6 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Hub Session Engine | 4/6 | In Progress|  |
-| 2. Secure Hub & PC Install | 5/7 | In Progress|  |
+| 2. Secure Hub & PC Install | 6/7 | In Progress|  |
 | 3. iOS App | 0/TBD | Not started | - |
 | 4. Push, Recovery & Release | 0/TBD | Not started | - |
