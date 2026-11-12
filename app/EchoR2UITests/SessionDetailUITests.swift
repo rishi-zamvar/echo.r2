@@ -62,9 +62,8 @@ final class SessionDetailUITests: XCTestCase {
         composer.tap()
         composer.typeText("Reply with exactly: echo-e2e-ok")
         el(app, "detail.send").tap()
-        let reply = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'echo-e2e-ok'"))
-        // The user bubble also contains the token only inside the longer prompt; require a bubble that is the reply.
-        let exact = app.staticTexts.matching(NSPredicate(format: "label == 'echo-e2e-ok'")).firstMatch
-        XCTAssertTrue(exact.waitForExistence(timeout: 90) || reply.count > 1)
+        // The user bubble holds the longer prompt, so an exact-label match is the assistant reply.
+        let reply = app.staticTexts.matching(NSPredicate(format: "label == 'echo-e2e-ok'")).firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 90))
     }
 }
