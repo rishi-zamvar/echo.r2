@@ -1355,3 +1355,101 @@ test('takeover busy then ok', posix, async () => {
     assert.equal((await r.json()).error, 'not_resumable');
   } finally { h.close(); }
 });
+
+// ---- 05-05: auto-pair + push messages ----
+import { pushMessage } from './apns.js';
+const NODE = (id, extra = {}) => ({ UserProfile: { LoginName: 'owner@example.com' }, Node: { StableID: id, ...extra } });
+async function autoHub(cfg = { owner: 'owner@example.com' }) {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ ...cfg, roots: [fs.realpathSync(os.tmpdir())] }));
+  const h = await startHub({ port: 0, claudeCmd: [process.execPath, fake], dataDir: dir, hookPort: 0,
+    tailscale: [process.execPath, fakeTs], tailnetPort: 0, allowLoopbackTailnet: true, whoisTtlMs: 0 });
+  return { h, dir, base: `http://127.0.0.1:${h.port}`, tb: `http://127.0.0.1:${await h.tailnetReady}` };
+}
+const cfgOf = (a) => JSON.parse(fs.readFileSync(path.join(a.dir, 'config.json'), 'utf8'));
+
+test('auto pair mints a working token for the owner', async () => {
+  const a = await autoHub();
+  try {
+    setTs({ whois: NODE('nPhone') });
+    const r = await jpost(`${a.tb}/pair/auto`, { deviceName: 'iphone' });
+    assert.equal(r.status, 201);
+    const { token, deviceId } = await r.json();
+    assert.ok(token && deviceId);
+    assert.equal((await fetch(`${a.tb}/sessions`, { headers: bearer(token) })).status, 200);
+    assert.equal((await jpost(`${a.base}/pair/auto`, {})).status, 404); // loopback has no such route
+  } finally { setTs({ whois: OWNER }); a.h.close(); }
+});
+
+test('auto pair refuses without owner and never captures one', async () => {
+  const a = await autoHub({});
+  try {
+    setTs({ whois: NODE('nPhone') });
+    const r = await jpost(`${a.tb}/pair/auto`, {});
+    assert.equal(r.status, 403);
+    assert.deepEqual(await r.json(), { error: 'no_owner' });
+    assert.equal(cfgOf(a).owner, undefined);
+  } finally { setTs({ whois: OWNER }); a.h.close(); }
+});
+
+test('auto pair refuses other users and tagged nodes', async () => {
+  const a = await autoHub();
+  try {
+    for (const who of [{ UserProfile: { LoginName: 'intruder@example.com' }, Node: { StableID: 'n1' } },
+      { UserProfile: { LoginName: 'tagged-devices' }, Node: { StableID: 'n2', Tags: ['tag:x'] } },
+      NODE('n3', { Tags: ['tag:server'] })]) {
+      setTs({ whois: who });
+      assert.equal((await jpost(`${a.tb}/pair/auto`, {})).status, 403);
+    }
+  } finally { setTs({ whois: OWNER }); a.h.close(); }
+});
+
+test('auto pair rate limit is 5 per 10 minutes', async () => {
+  const a = await autoHub();
+  try {
+    setTs({ whois: NODE('nPhone') });
+    for (let i = 0; i < 5; i++) assert.equal((await jpost(`${a.tb}/pair/auto`, {})).status, 201);
+    const r = await jpost(`${a.tb}/pair/auto`, {});
+    assert.equal(r.status, 429);
+    assert.deepEqual(await r.json(), { error: 'rate_limited' });
+  } finally { setTs({ whois: OWNER }); a.h.close(); }
+});
+
+test('auto pair revoke denies the node until code pairing', async () => {
+  const a = await autoHub();
+  try {
+    setTs({ whois: NODE('nPhone') });
+    const { deviceId } = await (await jpost(`${a.tb}/pair/auto`, {})).json();
+    assert.equal((await jpost(`${a.base}/admin/revoke`, { id: deviceId })).status, 200);
+    assert.deepEqual(cfgOf(a).autoPairDeny, ['nPhone']);
+    const r = await jpost(`${a.tb}/pair/auto`, {});
+    assert.equal(r.status, 403);
+    assert.deepEqual(await r.json(), { error: 'auto_pair_denied' });
+    await pairDevice('re', a.base, a.tb); // code pairing from the same node
+    assert.deepEqual(cfgOf(a).autoPairDeny, []);
+    assert.equal((await jpost(`${a.tb}/pair/auto`, {})).status, 201);
+  } finally { setTs({ whois: OWNER }); a.h.close(); }
+});
+
+test('push messages are plain language', () => {
+  assert.match(pushMessage(403, 'BadEnvironmentKeyInToken'), /Sandbox & Production/);
+  assert.match(pushMessage(410), /unregistered/);
+  assert.equal(pushMessage(418, 'Weird'), 'Apple push error 418 Weird');
+  assert.match(pushMessage(0, 'conn'), /could not reach Apple/);
+});
+
+test('push test carries message and health pushLastError', async () => {
+  const a = await apnsHub();
+  try {
+    const d = await pairDevice('A', a.base, a.tb);
+    await jpost(`${a.tb}/devices/push`, { token: TOK_A, env: 'sandbox' }, bearer(d.token));
+    assert.equal((await (await fetch(`${a.base}/health`)).json()).pushLastError, null);
+    a.script[TOK_A] = [{ status: 403, reason: 'BadEnvironmentKeyInToken' }];
+    const r = await (await jpost(`${a.tb}/devices/push/test`, {}, bearer(d.token))).json();
+    assert.match(r.results[0].message, /Sandbox & Production/);
+    const e = (await (await fetch(`${a.base}/health`)).json()).pushLastError;
+    assert.equal(e.reason, 'BadEnvironmentKeyInToken'); assert.equal(e.status, 403); assert.ok(e.at && e.message);
+    await jpost(`${a.tb}/devices/push/test`, {}, bearer(d.token)); // default 200
+    assert.equal((await (await fetch(`${a.base}/health`)).json()).pushLastError, null);
+  } finally { a.h.close(); }
+});

@@ -61,13 +61,30 @@ export function http2Send() {
   return send;
 }
 
+const MSG = {
+  BadEnvironmentKeyInToken: 'Push key is limited to one environment. In Apple Developer > Keys, set it to Sandbox & Production.',
+  InvalidProviderToken: 'Push key id or team id is wrong on the hub.',
+  ExpiredProviderToken: 'Hub push token expired; it refreshes automatically, try again.',
+  TooManyProviderTokenUpdates: 'Too many push key refreshes; wait 20 minutes.',
+  BadDeviceToken: "This phone's push token is from a different build. Reopen the app to re-register.",
+  Unregistered: 'This phone unregistered from push. Reopen the app.',
+  BadTopic: 'Bundle id on the hub does not match the app.',
+  TopicDisallowed: 'Bundle id on the hub does not match the app.',
+  DeviceTokenNotForTopic: 'Bundle id on the hub does not match the app.',
+};
+export function pushMessage(status, reason) {
+  if (reason === 'conn' || status === 0) return "Hub could not reach Apple's push servers";
+  if (status === 410) return MSG.Unregistered;
+  return MSG[reason] ?? `Apple push error ${status} ${reason ?? ''}`.trim();
+}
+
 export class Push {
   constructor({ apns = {}, dataDir = '.', devices, send, now = Date.now, cooldownMs = 10000, setTimer = setTimeout }) {
     this.devices = devices; this.now = now; this.cooldownMs = cooldownMs; this.setTimer = setTimer;
     this.cool = new Map(); // sessionId -> {until, lastKey, pending, timer}
     this.cfg = apns;
     this.jwt = null; this.jwtAt = 0; this.key = null;
-    this.status = 'unconfigured';
+    this.status = 'unconfigured'; this.lastError = null;
     if (apns.keyId && apns.teamId && apns.bundleId) {
       const file = apns.keyPath || path.join(dataDir, `AuthKey_${apns.keyId}.p8`);
       try {
@@ -96,6 +113,11 @@ export class Push {
       const out = { token: token.slice(0, 8), status: r ? r.status : 0 };
       if (r?.reason) out.reason = r.reason;
       else if (!r) out.reason = 'conn';
+      if (out.status === 200) this.lastError = null;
+      else {
+        out.message = pushMessage(out.status, out.reason);
+        this.lastError = { status: out.status, reason: out.reason ?? null, message: out.message, at: new Date().toISOString() };
+      }
       if (out.status !== 200) console.log(`apns ${out.token} ${out.status} ${out.reason ?? ''}`);
       if (r && (r.status === 410 || (r.status === 400 && (r.reason === 'BadDeviceToken' || r.reason === 'Unregistered')))) {
         this.devices.dropPush(token);

@@ -21,6 +21,8 @@ Do this immediately after install: the first pair sets the owner login.
 
 Enter the code in the app within 5 minutes.
 
+Zero-tap: `POST /pair/auto {deviceName}` on the tailnet listener mints a token with no code, only when an owner is already set (by a code pair) and whois shows that owner on an untagged node. Max 5 per 10 minutes. Revoking an auto-paired device adds its Tailscale node to `autoPairDeny` in config.json, so it cannot auto-pair again; a code pair from that node clears the entry.
+
 ## Devices and revoke
 
     node hub/cli.js devices

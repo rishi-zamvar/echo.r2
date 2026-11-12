@@ -35,20 +35,27 @@ export async function tailnetIp(cmd, { allowLoopback = false } = {}) {
 
 export function makeWhois({ cmd, ttlMs = 60000 }) {
   const cache = new Map();
-  return async function whois(remoteAddress) {
+  // detail: {login, node} or null (tagged, errors, missing); node = stable id for the deny list
+  async function detail(remoteAddress) {
     const ip = String(remoteAddress ?? '').replace(/^::ffff:/, '');
     if (!net.isIP(ip)) return null;
     const hit = cache.get(ip);
-    if (hit && hit.exp > Date.now()) return hit.login;
+    if (hit && hit.exp > Date.now()) return hit.d;
     try {
       const { stdout } = await run(cmd[0], [...cmd.slice(1), 'whois', '--json', ip], { timeout: 3000, maxBuffer: 1 << 20 });
-      const login = JSON.parse(stdout)?.UserProfile?.LoginName;
+      const j = JSON.parse(stdout);
+      const login = j?.UserProfile?.LoginName;
       if (typeof login !== 'string' || !login || login === 'tagged-devices') return null;
+      if (Array.isArray(j?.Node?.Tags) && j.Node.Tags.length) return null;
+      const d = { login, node: j?.Node?.StableID || j?.Node?.ID || j?.Node?.Name || null };
       if (cache.size > 100) cache.clear();
-      cache.set(ip, { login, exp: Date.now() + ttlMs });
-      return login;
+      cache.set(ip, { d, exp: Date.now() + ttlMs });
+      return d;
     } catch { return null; }
-  };
+  }
+  const whois = async (ip) => (await detail(ip))?.login ?? null;
+  whois.detail = detail;
+  return whois;
 }
 
 export function loadConfig(dataDir) {
@@ -97,10 +104,10 @@ export class Pairing {
 export class Devices {
   constructor(file) { this.file = file; this.items = load(file, []); this.saved = 0; }
   persist() { save(this.file, this.items, { mode: 0o600 }); this.saved = Date.now(); }
-  add(name) {
+  add(name, autoNode) {
     const token = crypto.randomBytes(32).toString('base64url');
     const id = crypto.randomUUID();
-    this.items.push({ id, name, hash: sha(token).toString('hex'), createdAt: new Date().toISOString(), lastSeen: null });
+    this.items.push({ id, name, hash: sha(token).toString('hex'), createdAt: new Date().toISOString(), lastSeen: null, ...(autoNode ? { autoNode } : {}) });
     this.persist();
     return { token, deviceId: id };
   }

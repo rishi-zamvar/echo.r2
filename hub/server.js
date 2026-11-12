@@ -74,7 +74,7 @@ export async function startHub({
     });
   }
 
-  const health = () => ({ ok: true, protocol: 1, version, gitSha, uptime: process.uptime(), os: process.platform, hubName: os.hostname(), epoch, claude, push: push.status });
+  const health = () => ({ ok: true, protocol: 1, version, gitSha, uptime: process.uptime(), os: process.platform, hubName: os.hostname(), epoch, claude, push: push.status, pushLastError: push.lastError ?? null });
   const deny = (sock, line) => { sock.end(`HTTP/1.1 ${line}\r\nConnection: close\r\n\r\n`); };
 
   // returns true if request may proceed to loopback routing; otherwise has responded
@@ -96,6 +96,7 @@ export async function startHub({
         if (!login || (config.owner && login !== config.owner)) return json(res, 403, { error: 'forbidden' });
         if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, health());
         if (req.method === 'POST' && url.pathname === '/pair') return await pair(req, res, login);
+        if (req.method === 'POST' && url.pathname === '/pair/auto') return await autoPair(req, res);
         const dev = bearerDevice(req);
         if (!dev) return json(res, 401, { error: 'unauthorized' });
         return await routes(req, res, url, dev);
@@ -125,8 +126,30 @@ export async function startHub({
     if (!got) return json(res, 403, { error: 'bad_code' });
     const name = got.name || trimName(body.deviceName) || 'device';
     const out = devices.add(name);
-    if (!config.owner) { config.owner = login; saveConfig(dataDir, config); }
+    let dirty = false;
+    if (!config.owner) { config.owner = login; dirty = true; }
+    const node = (await whois.detail(req.socket.remoteAddress))?.node; // explicit re-pair re-allows the node
+    if (node && config.autoPairDeny?.includes(node)) { config.autoPairDeny = config.autoPairDeny.filter((n) => n !== node); dirty = true; }
+    if (dirty) saveConfig(dataDir, config);
     console.log(`paired ${name}`);
+    json(res, 201, out);
+  }
+
+  // D-09: zero-tap pairing for the owner's untagged devices; never captures the owner
+  let autoHits = []; // ponytail: global in-memory limiter, per-node if multiple owners ever matter
+  async function autoPair(req, res) {
+    const d = await whois.detail(req.socket.remoteAddress);
+    if (!config.owner) return json(res, 403, { error: 'no_owner' });
+    if (!d || d.login !== config.owner) return json(res, 403, { error: 'forbidden' });
+    if (d.node && (config.autoPairDeny ?? []).includes(d.node)) return json(res, 403, { error: 'auto_pair_denied' });
+    const t = Date.now();
+    autoHits = autoHits.filter((x) => t - x < 600000);
+    if (autoHits.length >= 5) return json(res, 429, { error: 'rate_limited' });
+    autoHits.push(t);
+    const body = (await parseBody(req)) ?? {};
+    const name = trimName(body.deviceName) || 'device';
+    const out = devices.add(name, d.node);
+    console.log(`auto-paired ${name}`);
     json(res, 201, out);
   }
 
@@ -141,10 +164,13 @@ export async function startHub({
     if (req.method === 'POST' && url.pathname === '/admin/revoke') {
       const body = await parseBody(req);
       if (!body || typeof body.id !== 'string') return json(res, 400, { error: 'bad_json' });
-      const name = devices.items.find((d) => d.id === body.id || d.name === body.id)?.name;
+      const target = devices.items.find((d) => d.id === body.id || d.name === body.id);
+      const name = target?.name;
+      const autoNode = target?.autoNode;
       let revoked;
       try { revoked = devices.revoke(body.id); } catch { return json(res, 409, { error: 'ambiguous' }); }
       if (!revoked.length) return json(res, 404, { error: 'not_found' });
+      if (autoNode && revoked.length && !(config.autoPairDeny ?? []).includes(autoNode)) { config.autoPairDeny = [...(config.autoPairDeny ?? []), autoNode]; saveConfig(dataDir, config); }
       for (const ws of wss.clients) if (revoked.includes(ws.deviceId)) ws.close(4401, 'revoked');
       console.log(`revoked ${name}`);
       return json(res, 200, { revoked });
