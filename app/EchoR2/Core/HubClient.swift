@@ -39,6 +39,9 @@ struct HubClient: Sendable {
     func pair(code: String, deviceName: String) async throws -> PairResponse {
         try await send("pair", method: "POST", body: PairRequest(code: code, deviceName: deviceName))
     }
+    func pairAuto(deviceName: String) async throws -> PairResponse {
+        try await send("pair/auto", method: "POST", body: PairAutoRequest(deviceName: deviceName))
+    }
     func sessions() async throws -> SessionsResponse { try await get("sessions") }
     func history(id: String, before: Int? = nil, limit: Int = 200) async throws -> HistoryResponse {
         var q = "sessions/\(id)/history?limit=\(limit)"

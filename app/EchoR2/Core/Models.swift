@@ -17,10 +17,25 @@ struct Health: Codable, Hashable, Sendable {
     var claude: ClaudeInfo?
     /// "unconfigured" | "ready"; absent on older hubs.
     var push: String?
+    var pushLastError: PushError?
 
     enum CodingKeys: String, CodingKey {
-        case ok, version, gitSha, uptime, os, hubName, epoch, claude, push
+        case ok, version, gitSha, uptime, os, hubName, epoch, claude, push, pushLastError
         case protocolVersion = "protocol"
+    }
+}
+
+struct PushError: Codable, Hashable, Sendable {
+    var status: Int
+    var reason: String?
+    var message: String
+    var at: String
+}
+
+enum PairingCode {
+    /// Strip non-alphanumerics, uppercase, then cap at 8.
+    static func normalize(_ s: String) -> String {
+        String(s.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }.uppercased().prefix(8))
     }
 }
 
@@ -35,7 +50,16 @@ struct SessionInfo: Codable, Hashable, Sendable, Identifiable {
     var startedAt: String?
     var label: String?
     var title: String?
+    var summary: String?
+    var noise: Bool?
+    var lastActivity: String?
+    var entrypoint: String?
 
+    private static func parse(_ s: String?) -> Date? {
+        guard let s else { return nil }
+        return try? Date(s, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+    }
+    var lastActivityDate: Date? { Self.parse(lastActivity) }
     var startedDate: Date? {
         guard let startedAt else { return nil }
         return try? Date(startedAt, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true))
@@ -59,21 +83,24 @@ struct SessionInfo: Codable, Hashable, Sendable, Identifiable {
         }
     }
 
-    /// waiting, running/starting, done, exited/stopped/unknown, externals last.
-    var sortRank: Int {
-        if isExternal { return 4 }
+    enum Activity: Sendable { case running, needsYou, idle }
+    var activity: Activity {
+        if isExternal { return .idle }
         switch state {
-        case "waiting": return 0
-        case "running", "starting": return 1
-        case "done": return 2
-        default: return 3
+        case "running", "starting": return .running
+        case "waiting": return .needsYou
+        default: return .idle
         }
     }
 
+    /// D-08: waiting, then running, then everything else; each by last activity desc.
+    private var sortRank: Int { activity == .needsYou ? 0 : activity == .running ? 1 : 2 }
+
     static func sorted(_ list: [SessionInfo]) -> [SessionInfo] {
-        list.sorted {
+        func t(_ s: SessionInfo) -> Date { s.lastActivityDate ?? s.startedDate ?? .distantPast }
+        return list.sorted {
             if $0.sortRank != $1.sortRank { return $0.sortRank < $1.sortRank }
-            return ($0.startedDate ?? .distantPast) > ($1.startedDate ?? .distantPast)
+            return t($0) > t($1)
         }
     }
 }
@@ -95,10 +122,11 @@ struct RootsResponse: Codable, Hashable, Sendable {
 }
 
 struct PairRequest: Codable, Sendable { var code: String; var deviceName: String }
+struct PairAutoRequest: Codable, Sendable { var deviceName: String }
 struct PairResponse: Codable, Sendable { var token: String; var deviceId: String }
 struct CreateSessionRequest: Codable, Sendable { var cwd: String; var prompt: String? }
 struct CreateSessionResponse: Codable, Sendable { var id: String }
 struct PushRegistration: Codable, Sendable { var token: String; var env: String }
-struct PushResult: Codable, Hashable, Sendable { var token: String; var status: Int; var reason: String? }
+struct PushResult: Codable, Hashable, Sendable { var token: String; var status: Int; var reason: String?; var message: String? }
 struct PushTestResponse: Codable, Hashable, Sendable { var sent: Int; var results: [PushResult] }
 struct ErrorBody: Codable, Sendable { var error: String }

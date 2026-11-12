@@ -45,13 +45,34 @@ final class ModelsTests: XCTestCase {
     }
 
     func testSorted() {
-        let t1 = "2026-01-01T00:00:00.000Z", t2 = "2026-01-02T00:00:00.000Z"
+        func s(_ id: String, _ st: String, _ la: String, src: String = "hub") -> SessionInfo {
+            var x = sess(id, st, source: src); x.lastActivity = la; return x
+        }
+        let t1 = "2026-01-01T00:00:00.000Z", t2 = "2026-01-02T00:00:00.000Z", t3 = "2026-01-03T00:00:00.000Z"
         let out = SessionInfo.sorted([
-            sess("ext", "external", source: "external", at: t2), sess("exited", "exited", at: t2),
-            sess("done", "done", at: t2), sess("runOld", "running", at: t1),
-            sess("runNew", "running", at: t2), sess("wait", "waiting", at: t1),
+            s("ext", "external", t3, src: "external"), s("exited", "exited", t2),
+            s("runOld", "running", t1), s("runNew", "running", t2), s("wait", "waiting", t1),
         ])
-        XCTAssertEqual(out.map(\.id), ["wait", "runNew", "runOld", "done", "exited", "ext"])
+        XCTAssertEqual(out.map(\.id), ["wait", "runNew", "runOld", "ext", "exited"])
+    }
+
+    func testActivityAndNewFields() throws {
+        XCTAssertEqual(sess("a", "starting").activity, .running)
+        XCTAssertEqual(sess("a", "waiting").activity, .needsYou)
+        XCTAssertEqual(sess("a", "done").activity, .idle)
+        XCTAssertEqual(sess("a", "external", source: "external").activity, .idle)
+        let j = #"{"id":"a","cwd":"/x","state":"done","source":"hub","summary":"S","noise":true,"lastActivity":"2026-11-12T11:59:00.000Z","entrypoint":"cli"}"#
+        let s = try JSONDecoder().decode(SessionInfo.self, from: Data(j.utf8))
+        XCTAssertEqual(s.summary, "S"); XCTAssertEqual(s.noise, true); XCTAssertEqual(s.entrypoint, "cli")
+        XCTAssertNotNil(s.lastActivityDate)
+        let r = try JSONDecoder().decode(SessionsResponse.self, from: fixture("sessions.json"))
+        XCTAssertNil(r.sessions[0].summary)
+        XCTAssertEqual(r.sessions.last?.noise, true)
+    }
+
+    func testPairingCodeNormalize() {
+        XCTAssertEqual(PairingCode.normalize("ab-cd 23_45x"), "ABCD2345")
+        XCTAssertEqual(PairingCode.normalize("ABCD-2345"), "ABCD2345")
     }
 
     func testRoots() throws {
