@@ -53,9 +53,9 @@
 
 - [ ] **NOTF-01**: Rishi gets a push when a session finishes a turn, needs input, or exits — showing the session name and a one-line summary
 - [ ] **NOTF-02**: Tapping a push opens that session in the app
-- [ ] **NOTF-03**: Pushes work for both debug (sandbox) and TestFlight (production) builds; stale device tokens are cleaned up
+- [x] **NOTF-03**: Pushes work for both debug (sandbox) and TestFlight (production) builds; stale device tokens are cleaned up
 - [ ] **NOTF-04**: Rapid repeated hook events for one session collapse into a single push
-- [ ] **NOTF-05**: Rishi gets a "hub started" push when the hub comes up, so silent outages are noticed
+- [x] **NOTF-05**: Rishi gets a "hub started" push when the hub comes up, so silent outages are noticed
 
 ### App & Distribution
 
@@ -119,9 +119,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONN-02 | Phase 3 | Complete |
 | NOTF-01 | Phase 4 | Pending |
 | NOTF-02 | Phase 4 | Pending |
-| NOTF-03 | Phase 4 | Pending |
+| NOTF-03 | Phase 4 | Complete |
 | NOTF-04 | Phase 4 | Pending |
-| NOTF-05 | Phase 4 | Pending |
+| NOTF-05 | Phase 4 | Complete |
 | SESS-06 | Phase 4 | Pending |
 | EXT-02 | Phase 4 | Pending |
 | APP-02 | Phase 4 | Pending |
