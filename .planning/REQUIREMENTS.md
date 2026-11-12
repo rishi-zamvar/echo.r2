@@ -62,6 +62,34 @@
 - [x] **APP-01**: App uses the shared DesignSystem (from WorkoutCoach/ChessCoach) with its own echo.r2 accent and logo
 - [ ] **APP-02**: App builds from XcodeGen `project.yml` and ships to Rishi's phone via TestFlight with one release script
 
+## v1.1 Requirements (Phase 5: Safety, Chat and UI Rebuild)
+
+Source: `docs/v1.1-UPDATE.md`, `.planning/phases/05-v1-1-safety-chat-and-ui-rebuild/05-CONTEXT.md`.
+
+### Safety
+- [ ] **V11-01**: The hub never kills a process it did not spawn (boot sweep needs the exact session id on the command line and a non-Even-Terminal parent; stop only kills PIDs spawned this boot); a harness proves 0 external kills over 50 restarts
+- [ ] **V11-02**: echo touches nothing in Even Terminal's Claude config: global hooks are opt-in (`--global-hooks`), external state/alerts come from the transcript
+- [ ] **V11-03**: Take over / Resume is refused, with a clear message, for Even Terminal (`sdk-ts`) sessions and for any session a live process still references
+
+### Push
+- [ ] **V11-04**: Push failures are explained in plain language in the app (test push result + hub `pushLastError`)
+
+### Chat & sessions
+- [ ] **V11-05**: Every session (hub-owned, stopped, exited, external, dormant) opens with its full chat history from the transcript, also after hub restarts, merged with the live stream without duplicates
+- [ ] **V11-06**: External sessions show "Watching — started in <source>" with a Continue here action; hub-owned sessions always accept input and send works end to end
+- [ ] **V11-07**: The session list shows a one-line summary per session, hides noise in a collapsed "Other" section, sorts active first then by last activity, and colours active vs inactive distinctly
+- [ ] **V11-08**: The phone pairs itself with no code when the request comes from the owner's untagged tailnet device; code pairing remains as fallback and strips non-alphanumerics
+
+### UI
+- [ ] **V11-09**: The UI is rebuilt to one written design direction (apothecary language, no black surfaces, light terminal by default, designed empty/loading/error states, chat bubbles with markdown and collapsed tool rows)
+- [ ] **V11-10**: Navigation, list and state changes use spring motion without layout jumps (Reduce Motion respected) and meaningful interactions fire haptics
+- [ ] **V11-11**: VoiceOver labels on every control, Dynamic Type up to XXL without truncating key info, WCAG AA contrast
+
+### Testing & release
+- [ ] **V11-12**: Rigorous frontend test suite: simulator snapshot tests for every screen at default and XXL, XCUITest flows against a deterministic mock hub, accessibility audits, plus hub node:test coverage for every new endpoint and guard
+- [ ] **V11-13**: The app tolerates Tailscale relay latency (request timeouts >= 10 s, quiet reconnects under 3 s)
+- [ ] **V11-14**: echo 0.2.0 ships to TestFlight via release.sh (export compliance skipped) and passes the on-device checklist, including push after the APNs key fix
+
 ## v2 Requirements
 
 ### Handoff
@@ -125,12 +153,27 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SESS-06 | Phase 4 | Pending |
 | EXT-02 | Phase 4 | Pending |
 | APP-02 | Phase 4 | Pending |
+| V11-01 | Phase 5 | Pending |
+| V11-02 | Phase 5 | Pending |
+| V11-03 | Phase 5 | Pending |
+| V11-04 | Phase 5 | Pending |
+| V11-05 | Phase 5 | Pending |
+| V11-06 | Phase 5 | Pending |
+| V11-07 | Phase 5 | Pending |
+| V11-08 | Phase 5 | Pending |
+| V11-09 | Phase 5 | Pending |
+| V11-10 | Phase 5 | Pending |
+| V11-11 | Phase 5 | Pending |
+| V11-12 | Phase 5 | Pending |
+| V11-13 | Phase 5 | Pending |
+| V11-14 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 30 total
 - Mapped to phases: 30
 - Unmapped: 0 ✓
+- v1.1 requirements: 14 total (V11-01..V11-14), all mapped to Phase 5
 
 ---
 *Requirements defined: 2026-11-11*
-*Last updated: 2026-11-11 after roadmap creation*
+*Last updated: 2026-11-12 after Phase 5 planning (v1.1 requirements added)*

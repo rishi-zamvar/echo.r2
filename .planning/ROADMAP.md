@@ -10,6 +10,7 @@ High-risk Windows/ConPTY work goes first and is proven from a CLI client (no iOS
 - [ ] **Phase 2: Secure Hub & Install (Mac stand-in + PC)** - Hub is tailnet-only, token-paired, auto-starts at login on the Mac (launchd, live now) and the PC (Task Scheduler, verified when PC returns)
 - [x] **Phase 3: iOS App** - Paired app lists sessions, starts them, shows chat and terminal, watches external sessions, reconnects cleanly (completed 2026-11-12)
 - [ ] **Phase 4: Push, Recovery & Release** - APNs alerts with deep links, resume/take-over, TestFlight release
+- [ ] **Phase 5: v1.1 Safety, Chat and UI Rebuild** - Even Terminal safety, history + Continue here, clean list, auto-pair, UI rebuild with snapshot/XCUITest suite, 0.2.0
 
 ## Phase Details
 
@@ -121,13 +122,35 @@ Plans:
 | 2. Secure Hub & PC Install | 6/7 | In Progress|  |
 | 3. iOS App | 5/5 | Complete   | 2026-11-12 |
 | 4. Push, Recovery & Release | 6/7 | In Progress|  |
+| 5. v1.1 Safety, Chat and UI Rebuild | 0/12 | Planned |  |
 
 ### Phase 5: v1.1 Safety, Chat and UI Rebuild
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** echo never disturbs Even Terminal, chat works for every session (history, Continue here, send), the list is clean and summarized, pairing is zero-tap, and the UI is rebuilt to a polished, haptic, accessible, test-locked standard — shipped as TestFlight 0.2.0.
+**Mode:** mvp
 **Depends on:** Phase 4
-**Plans:** 0 plans
+**Requirements**: V11-01, V11-02, V11-03, V11-04, V11-05, V11-06, V11-07, V11-08, V11-09, V11-10, V11-11, V11-12, V11-13, V11-14
+**Success Criteria** (what must be TRUE):
+  1. 50 hub restarts plus every app action while an Even Terminal session is mid-turn never kill it; installs never touch ~/.claude/settings.json by default; Even Terminal sessions cannot be taken over.
+  2. Any session (stopped, exited, external, after hub restart) opens with its full chat history; externals offer Continue here; a message sent to a hub-owned session gets a reply in chat.
+  3. The list shows one-line summaries, hides noise under "Other", sorts active first, and colours active vs idle distinctly.
+  4. A fresh install pairs itself with no code on the owner's phone; code pairing still works as fallback.
+  5. Test push failures read in plain language; after the APNs key is set to Sandbox & Production, push arrives on the TestFlight build.
+  6. The UI follows one design direction with no black surfaces, spring motion, haptics and VoiceOver/Dynamic Type/AA contrast, enforced by snapshot tests (default + XXL), XCUITest flows on a mock hub and accessibility audits.
+  7. echo 0.2.0 is on TestFlight and Rishi approves the on-device checklist.
+**Plans:** 12 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 5 to break down)
+- [ ] 05-01-PLAN.md — P0-1 kill guards (spawned-PID set, Even Terminal parent check, kill log) + 50-restart safety harness (V11-01)
+- [ ] 05-02-PLAN.md — Simulator test harness: SnapshotTesting + XCUITest targets, mock hub, test.sh, DEBUG launch hooks (V11-12) [parallel with 05-01]
+- [ ] 05-03-PLAN.md — Global hooks opt-in, transcript-derived external alerts, D-03 take-over/resume guards, deploy (V11-02, V11-03)
+- [ ] 05-04-PLAN.md — History endpoint + indexed chat events, summary/noise/lastActivity, 7-day dormant externals, deploy (V11-05, V11-07)
+- [ ] 05-05-PLAN.md — POST /pair/auto (owner, tagged, revoke deny-list, rate limit) + plain APNs errors/pushLastError, deploy (V11-04, V11-08)
+- [ ] 05-06-PLAN.md — App: history for every session, Continue here + refusals, always-on composer, relay tolerance, live-hub send proof (V11-03, V11-05, V11-06, V11-13) [parallel with 05-05]
+- [ ] 05-07-PLAN.md — App: auto-pair + code fix, list summary/Other/sort/tones, Settings push messages (V11-04, V11-07, V11-08)
+- [ ] 05-08-PLAN.md — UI rebuild 1: impeccable critique → DESIGN.md + tokens; List, Pairing, Settings, New Session with motion/haptics/a11y (V11-09..11)
+- [ ] 05-09-PLAN.md — UI rebuild 2: chat bubbles/markdown/tool groups/working/jump pill, header, Chat↔Terminal toggle, light terminal (V11-09..11)
+- [ ] 05-10-PLAN.md — Snapshot suite (every screen × state × default/XXL) + accessibility audits + contrast test (V11-11, V11-12)
+- [ ] 05-11-PLAN.md — Remaining XCUITest flows + journey + flake gate; pre-release XcodeBuildMCP/impeccable review (V11-12)
+- [ ] 05-12-PLAN.md — CHECKPOINT: 0.2.0 TestFlight upload, APNs key Sandbox & Production, on-device checklist + live Even Terminal safety check (V11-14)
+**UI hint**: yes
