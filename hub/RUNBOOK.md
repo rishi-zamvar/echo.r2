@@ -32,6 +32,19 @@ Enter the code in the app within 5 minutes.
 
 Prints `deployed <sha>` once /health reports the new gitSha. On `deploy FAILED`, read the logs.
 
+## Push (APNs)
+
+Add to `~/.echo-hub/config.json`: `"apns": {"keyId": "<KEYID>", "teamId": "373D7DZ9NM", "bundleId": "com.rishizamvar.echor2"}` (optional `keyPath`; default is the key below).
+Put the key at `~/.echo-hub/AuthKey_<keyId>.p8`, mode 600. Never commit it; back it up in the password manager.
+Restart: `launchctl kickstart -k gui/$(id -u)/com.rishizamvar.echo-hub`.
+Verify: `curl -s 127.0.0.1:8790/health` shows `"push":"ready"`, then `node hub/cli.js test-push` (exits non-zero with `push_unconfigured` until the key is set).
+
+## Resume / take over
+
+- `node hub/cli.js resume <id>`: bring back a stopped (hub restarted) or exited hub session under the same id (`claude --resume`).
+- `node hub/cli.js takeover <id>`: pull an external session into the hub (writable). Refused with `409 busy` while its transcript changed in the last 60 s or a live claude process has it: stop it on the other device first, then retry.
+- Both re-check the cwd allowlist (`400 bad_cwd` outside the roots).
+
 ## Logs
 
 - `~/.echo-hub/hub.log` (plus `.1`, 5 MB rotation): hub log, never contains tokens.
