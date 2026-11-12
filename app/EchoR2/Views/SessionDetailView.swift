@@ -22,7 +22,20 @@ struct SessionDetailView: View {
     }
 
     var body: some View {
-        ChatView(model: model, info: info)
+        VStack(spacing: 0) {
+            Picker("", selection: $model.tab) {
+                Text("Chat").tag(SessionDetailModel.Tab.chat)
+                Text("Terminal").tag(SessionDetailModel.Tab.terminal)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, Spacing.l).padding(.vertical, Spacing.s)
+            .disabled(model.readOnly)  // D-17
+            if model.tab == .terminal && !model.readOnly {
+                TerminalCard(model: model)
+            } else {
+                ChatView(model: model, info: info)
+            }
+        }
             .overlay { if model.notFound { Text("Session not found").font(Typography.heading) } }
             .navigationTitle(info?.displayTitle ?? "Session")
             .navigationBarTitleDisplayMode(.inline)

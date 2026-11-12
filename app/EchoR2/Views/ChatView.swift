@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ChatView: View {
-    let model: SessionDetailModel
+    @Bindable var model: SessionDetailModel
     let info: SessionInfo?
 
     @State private var draft = ""
@@ -14,6 +14,15 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if model.trustPrompt {
+                Card {
+                    Text("Claude is asking to trust this folder. Open Terminal to answer.")
+                        .font(Typography.callout).foregroundStyle(Palette.ink)
+                    SecondaryButton(title: "Open Terminal") { model.tab = .terminal }
+                }
+                .overlay(RoundedRectangle(cornerRadius: Spacing.cornerLarge).stroke(Palette.warning, lineWidth: 1.5))
+                .padding(Spacing.m)
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: Spacing.s) {
