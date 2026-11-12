@@ -6,7 +6,6 @@ struct SessionDetailView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: SessionDetailModel
     @State private var confirmStop = false
-    @State private var confirmTakeover = false
 
     init(sessionId: String) {
         self.sessionId = sessionId
@@ -43,18 +42,7 @@ struct SessionDetailView: View {
             }
         }
             .overlay {
-                if model.notFound {
-                    if resumable {
-                        VStack(spacing: Spacing.m) {
-                            Text("Stopped").font(Typography.heading)
-                            PrimaryButton(title: "Resume") { Task { await model.resume(app: app) } }
-                                .disabled(model.busy)
-                        }
-                        .padding(Spacing.l)
-                    } else {
-                        Text("Session not found").font(Typography.heading)
-                    }
-                }
+                if model.notFound { Text("Session not found").font(Typography.heading) }
             }
             .navigationTitle(info?.displayTitle ?? "Session")
             .navigationBarTitleDisplayMode(.inline)
@@ -65,12 +53,11 @@ struct SessionDetailView: View {
                 if model.busy {
                     ToolbarItem(placement: .topBarTrailing) { ProgressView() }
                 }
+                if !model.readOnly {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         if resumable {
                             Button("Resume") { Task { await model.resume(app: app) } }
-                        } else if model.readOnly {
-                            Button("Take over…") { confirmTakeover = true }
                         } else {
                             Button("Interrupt") { Task { await model.interrupt() } }
                             Button("Stop", role: .destructive) { confirmStop = true }
@@ -79,11 +66,7 @@ struct SessionDetailView: View {
                         .accessibilityLabel("Session actions")
                         .disabled(model.busy)
                 }
-            }
-            .confirmationDialog("Take over this session?", isPresented: $confirmTakeover, titleVisibility: .visible) {
-                Button("Take over") { Task { await model.takeover(app: app) } }
-            } message: {
-                Text("Stop it on the other device first. The hub will resume it here and you can steer it.")
+                }
             }
             .alert("Couldn't complete", isPresented: Binding(get: { model.actionError != nil },
                                                             set: { if !$0 { model.actionError = nil } })) {

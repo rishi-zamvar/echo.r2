@@ -1,19 +1,29 @@
 import SwiftUI
 
 struct ChatView: View {
+    @Environment(AppModel.self) private var app
     @Bindable var model: SessionDetailModel
     let info: SessionInfo?
 
     @State private var draft = ""
     @State private var atBottom = true
 
-    private var ended: Bool { ["exited", "stopped"].contains(model.state) }
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.status == .live && !ended
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.busy
     }
 
     var body: some View {
         VStack(spacing: 0) {
+            if model.readOnly {
+                Card {
+                    Text("Watching — started in \(info?.label ?? "terminal")")
+                        .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                        .accessibilityIdentifier("detail.watchingHeader")
+                    PrimaryButton(title: "Continue here", action: { Task { await model.continueHere(app: app) } }, isLoading: model.busy)
+                    .accessibilityIdentifier("detail.continueHere")
+                }
+                .padding(Spacing.m)
+            }
             if model.trustPrompt {
                 Card {
                     Text("Claude is asking to trust this folder. Open Terminal to answer.")
@@ -26,6 +36,27 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: Spacing.s) {
+                        if model.olderCursor != nil {
+                            Color.clear.frame(height: 1).onAppear {
+                                Task {
+                                    let first = model.chat.first?.id
+                                    await model.loadOlder(app: app)
+                                    if let first { proxy.scrollTo(first, anchor: .top) }
+                                }
+                            }
+                        }
+                        if model.historyState == .loaded, model.chat.isEmpty {
+                            Text("No messages yet").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                                .accessibilityIdentifier("detail.history.empty")
+                        }
+                        if case .failed(let msg) = model.historyState {
+                            VStack(spacing: Spacing.s) {
+                                Text(msg).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                                SecondaryButton(title: "Retry") { model.retryHistory(app: app) }
+                            }
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("detail.error")
+                        }
                         ForEach(model.chat) { Row(line: $0) }
                         Color.clear.frame(height: 1).id("bottom")
                             .onAppear { atBottom = true }
@@ -52,32 +83,25 @@ struct ChatView: View {
     }
 
     @ViewBuilder private var footer: some View {
-        if model.readOnly {
-            note("Watching — started in \(info?.label ?? "terminal")")
-        } else if ended {
-            note("Session ended")
-        } else {
+        if !model.readOnly {
             HStack(alignment: .bottom, spacing: Spacing.m) {
                 TextField("Message", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .padding(Spacing.m)
                     .background(Palette.paper, in: RoundedRectangle(cornerRadius: Spacing.cornerLarge))
+                    .accessibilityIdentifier("detail.composer")
                 Button {
                     let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     draft = ""
                     // No optimistic echo: the transcript event renders the message.
-                    Task { await model.send(t) }
+                    Task { await model.send(t, app: app) }
                 } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
                     .disabled(!canSend)
                     .accessibilityLabel("Send")
+                    .accessibilityIdentifier("detail.send")
             }
             .padding(Spacing.m)
         }
-    }
-
-    private func note(_ s: String) -> some View {
-        Text(s).font(Typography.callout).foregroundStyle(Palette.textSecondary)
-            .frame(maxWidth: .infinity).padding(Spacing.l)
     }
 
     private struct Row: View {

@@ -106,7 +106,21 @@ final class AppModel {
         }
     }
 
+    @ObservationIgnored private var reconnectTask: Task<Void, Never>?
+
+    /// A stream is reconnecting; only surface "unreachable" if it is still down after 3 s (D-04).
+    func relayReconnecting() {
+        guard reconnectTask == nil else { return }
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, let self else { return }
+            self.reconnectTask = nil
+            self.connectionState = .unreachable("Reconnecting")
+        }
+    }
+
     func markOK() {
+        reconnectTask?.cancel(); reconnectTask = nil
         connectionState = .healthy
         lastSuccessfulCall = Date()
     }

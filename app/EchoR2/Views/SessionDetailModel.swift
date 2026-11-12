@@ -15,6 +15,12 @@ final class SessionDetailModel {
     var trustPrompt = false
     var actionError: String?
     var busy = false
+    var historyState: HistoryState = .loading
+    var olderCursor: Int?
+    /// Stream said 4404 (stopped/dormant/external): the transcript is shown, nothing is live.
+    var historyOnly = false
+
+    enum HistoryState: Equatable { case loading, loaded, failed(String) }
 
     enum Tab: String { case chat, terminal }
     var tab: Tab {
@@ -34,6 +40,8 @@ final class SessionDetailModel {
     @ObservationIgnored var cursor: StreamState?
     @ObservationIgnored private var stream: SessionStream?
     @ObservationIgnored private var consumeTask: Task<Void, Never>?
+    @ObservationIgnored private var startTask: Task<Void, Never>?
+    @ObservationIgnored private var loadingOlder = false
 
     init(sessionId: String, info: SessionInfo?) {
         self.sessionId = sessionId
@@ -56,17 +64,29 @@ final class SessionDetailModel {
         if chat.isEmpty, state == "unknown" { state = i.state }
     }
 
+    /// Loads history first (once), then opens the live stream; merge-by-index makes the stream replay safe.
     func start(app: AppModel) {
-        guard stream == nil, let base = HubClient.baseURL(from: app.host), let token = app.token else { return }
-        let s = SessionStream(base: base, token: token, sessionId: sessionId, initialState: cursor)
-        stream = s
-        Task { await s.start() }
-        consumeTask = Task { [weak self] in
-            for await out in s.outputs { self?.handle(out, app: app) }
+        guard stream == nil, startTask == nil else { return }
+        status = .connecting
+        historyOnly = false
+        startTask = Task { [weak self] in
+            guard let self else { return }
+            if self.historyState != .loaded { await self.loadHistory(app: app) }
+            guard !Task.isCancelled else { return }
+            self.startTask = nil
+            guard !self.notFound, let base = HubClient.baseURL(from: app.host), let token = app.token else { return }
+            let s = SessionStream(base: base, token: token, sessionId: self.sessionId, initialState: self.cursor)
+            self.stream = s
+            Task { await s.start() }
+            self.consumeTask = Task { [weak self] in
+                for await out in s.outputs { self?.handle(out, app: app) }
+            }
         }
     }
 
     func stop() {
+        startTask?.cancel()
+        startTask = nil
         let s = stream
         consumeTask?.cancel()
         consumeTask = nil
@@ -74,15 +94,49 @@ final class SessionDetailModel {
         if let s { Task { await s.stop() } }
     }
 
+    func loadHistory(app: AppModel) async {
+        guard let c = app.client() else { return }
+        historyState = .loading
+        do {
+            let r = try await c.history(id: sessionId)
+            chat = ChatLine.merge(chat, r.lines.map { ChatLine($0) })
+            olderCursor = r.before
+            historyState = .loaded
+        } catch HubError.server("not_found", _) {
+            notFound = true
+            historyState = .failed("Session not found")
+        } catch HubError.unauthorized {
+            app.handle(HubError.unauthorized)
+        } catch {
+            historyState = .failed("Couldn't load the conversation")
+        }
+    }
+
+    func retryHistory(app: AppModel) {
+        stop()
+        historyState = .loading
+        start(app: app)
+    }
+
+    func loadOlder(app: AppModel) async {
+        guard let before = olderCursor, !loadingOlder, let c = app.client() else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+        if let r = try? await c.history(id: sessionId, before: before) {
+            chat = ChatLine.merge(chat, r.lines.map { ChatLine($0) })
+            olderCursor = r.before
+        }
+    }
+
     private func handle(_ out: StreamOutput, app: AppModel) {
         switch out {
         case .cursor(let s): cursor = s
         case .effect(.resetUI):
-            chat = []
+            // Chat is kept: index-based merge makes the replay that follows a reset idempotent.
             termQueue = []
             terminal.feed(text: "\u{1b}c")  // RIS
             trust.reset(); trustPrompt = false; sawLive = false
-        case .effect(.chat(let l)): chat.append(l)
+        case .effect(.chat(let l)): chat = ChatLine.merge(chat, [l])
         case .effect(.state(let s)): state = s
         case .effect(.error(let e)): if e == "read_only" { readOnly = true }
         case .effect(.term(let d, let replay)):
@@ -98,9 +152,11 @@ final class SessionDetailModel {
             status = s
             switch s {
             case .live: app.markOK(); sendSize()
-            case .reconnecting: app.connectionState = .unreachable("Reconnecting")
+            case .reconnecting: app.relayReconnecting()  // D-04: debounced, short hiccups stay quiet
             case .unauthorized: app.handle(HubError.unauthorized)
-            case .gone: notFound = true
+            case .gone:
+                historyOnly = true
+                if historyState != .loaded { notFound = true }
             case .connecting: break
             }
         }
@@ -145,8 +201,14 @@ final class SessionDetailModel {
         if let (c, r) = lastSize { resize(cols: c, rows: r) }
     }
 
-    func send(_ text: String) async {
-        guard !readOnly else { return }
+    /// Resumes a stopped/exited session first, waits for the stream to be live, then sends.
+    func send(_ text: String, app: AppModel) async {
+        guard !readOnly, !busy else { return }
+        if state == "stopped" || state == "exited" || historyOnly {
+            guard await resume(app: app) else { return }
+        }
+        for _ in 0..<75 where status != .live { try? await Task.sleep(for: .milliseconds(200)) }
+        guard status == .live else { actionError = "Couldn't restart the session"; return }
         await stream?.send(.input(text))
     }
 
@@ -160,29 +222,42 @@ final class SessionDetailModel {
         start(app: app)
     }
 
-    func resume(app: AppModel) async {
-        guard !busy, let c = app.client() else { return }
+    /// Plain-language text for the hub's guard refusals (D-03); nil for anything else.
+    private func refusal(_ e: Error) -> String? {
+        guard case .server(let code, _)? = e as? HubError else { return nil }
+        switch code {
+        case "even_terminal": return "This session is open in Even Terminal. Continue it there, or start a new session here."
+        case "live_elsewhere": return "This session is still running somewhere else. Close it there first."
+        case "busy": return "It was active in the last minute. Try again shortly."
+        default: return nil
+        }
+    }
+
+    @discardableResult
+    func resume(app: AppModel) async -> Bool {
+        guard !busy, let c = app.client() else { return false }
         busy = true
         defer { busy = false }
         do {
             try await c.resume(id: sessionId)
             notFound = false
+            historyOnly = false
             state = "starting"
             await app.refreshSessions()
             restartStream(app: app)
-        } catch HubError.server("not_resumable", _) {
-            actionError = "Already running"
-        } catch HubError.server("bad_cwd", _) {
-            actionError = "Folder is no longer allowed on the hub"
-        } catch HubError.server("claude_unavailable", _) {
-            actionError = "Claude is unavailable on the hub"
+            return true
         } catch {
-            app.handle(error)
-            actionError = "Resume failed"
+            if let m = refusal(error) { actionError = m }
+            else if case .server("not_resumable", _)? = error as? HubError { actionError = "Already running" }
+            else if case .server("bad_cwd", _)? = error as? HubError { actionError = "Folder is no longer allowed on the hub" }
+            else if case .server("claude_unavailable", _)? = error as? HubError { actionError = "Claude is unavailable on the hub" }
+            else { app.handle(error); actionError = "Resume failed" }
+            Haptics.error()
+            return false
         }
     }
 
-    func takeover(app: AppModel) async {
+    func continueHere(app: AppModel) async {
         guard !busy, let c = app.client() else { return }
         busy = true
         defer { busy = false }
@@ -192,11 +267,11 @@ final class SessionDetailModel {
             tab = .chat
             await app.refreshSessions()
             restartStream(app: app)
-        } catch HubError.server("busy", _) {
-            actionError = "Still active elsewhere. Stop it there, then try again."
+            Haptics.success()
         } catch {
-            app.handle(error)
-            actionError = "Take over failed"
+            if let m = refusal(error) { actionError = m }
+            else { app.handle(error); actionError = "Couldn't continue here" }
+            Haptics.error()
         }
     }
 
