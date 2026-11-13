@@ -13,10 +13,14 @@ final class SessionDetailUITests: XCTestCase {
     }
 
     private func el(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id] }
+    /// Chat bubbles are one VoiceOver element labelled "You: …" / "Claude: …" (05-09).
+    private func labelled(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
 
     func testStoppedSessionShowsHistory() {
         let app = open(HUB_STOPPED)
-        XCTAssertTrue(app.staticTexts["list the files in this repo"].waitForExistence(timeout: 10))
+        XCTAssertTrue(labelled(app, "You: list the files in this repo").waitForExistence(timeout: 10))
         XCTAssertTrue(el(app, "detail.composer").exists)
     }
 
@@ -27,7 +31,18 @@ final class SessionDetailUITests: XCTestCase {
         composer.tap()
         composer.typeText("hello")
         el(app, "detail.send").tap()
-        XCTAssertTrue(app.staticTexts["echo: hello"].waitForExistence(timeout: 5))
+        XCTAssertTrue(labelled(app, "Claude: echo: hello").waitForExistence(timeout: 5))
+    }
+
+    func testWorkingIndicatorAndToolGroup() {
+        let app = open(HUB_RUNNING)
+        XCTAssertTrue(el(app, "detail.working").waitForExistence(timeout: 10))
+        let group = el(app, "detail.toolGroup")
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+        XCTAssertTrue(group.label.contains("Used 1 tool, collapsed"))
+        XCTAssertFalse(labelled(app, "Bash: ls -la").exists)
+        group.tap()
+        XCTAssertTrue(labelled(app, "Bash: ls -la").waitForExistence(timeout: 3))
     }
 
     func testContinueHereRefusedForEvenTerminal() {
@@ -63,7 +78,7 @@ final class SessionDetailUITests: XCTestCase {
         composer.typeText("Reply with exactly: echo-e2e-ok")
         el(app, "detail.send").tap()
         // The user bubble holds the longer prompt, so an exact-label match is the assistant reply.
-        let reply = app.staticTexts.matching(NSPredicate(format: "label == 'echo-e2e-ok'")).firstMatch
+        let reply = labelled(app, "Claude: echo-e2e-ok")
         XCTAssertTrue(reply.waitForExistence(timeout: 90))
     }
 }

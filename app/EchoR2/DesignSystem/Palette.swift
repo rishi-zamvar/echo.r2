@@ -17,6 +17,8 @@ enum Palette {
     /// Primary button fill + tint. Paper text on it is 5.0:1.
     static let primaryDeep = Color(red: 0.32, green: 0.46, blue: 0.38)
     static let accent = Color(red: 0.92, green: 0.74, blue: 0.74)
+    /// Sage-tinted paper for the user's chat bubbles (ink text on it is 11:1).
+    static let userBubble = Color(red: 0.86, green: 0.91, blue: 0.86)
 
     // MARK: - Ink (text)
     static let ink = Color(red: 0.20, green: 0.17, blue: 0.16)
