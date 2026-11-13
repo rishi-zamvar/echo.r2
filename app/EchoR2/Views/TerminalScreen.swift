@@ -64,8 +64,6 @@ struct ExtraKeysBar: View {
             }
             .padding(.horizontal, Spacing.l).padding(.vertical, Spacing.s)
         }
-        .background(Palette.surfaceAlt)
-        .overlay(alignment: .top) { Palette.divider.frame(height: 0.5) }
     }
 }
 
