@@ -40,14 +40,14 @@ struct SettingsView: View {
 
                 GroupTitle(text: "Notifications").padding(.top, Spacing.l)
                 Card {
-                    rows(pushRows)
+                    rows(pushRows, mono: false)
                     VStack(alignment: .leading, spacing: Spacing.m) {
                         if let e = app.health?.pushLastError {
                             note("Last push error: \(e.message)", systemImage: "exclamationmark.triangle", color: Palette.danger)
                                 .accessibilityIdentifier("settings.push.lasterror")
                         }
                         if let e = app.pushError {
-                            note(e, systemImage: "exclamationmark.triangle", color: Palette.danger)
+                            note("This phone couldn't register for push: \(e)", systemImage: "exclamationmark.triangle", color: Palette.danger)
                         }
                         SecondaryButton(title: sending ? "Sending…" : "Send test push") {
                             Task { await sendTest() }
@@ -95,11 +95,11 @@ struct SettingsView: View {
         }
     }
 
-    private func rows(_ items: [(String, String)]) -> some View {
+    private func rows(_ items: [(String, String)], mono: Bool = true) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { i, item in
                 if i > 0 { Rectangle().fill(Palette.divider).frame(height: 0.75) }
-                LabeledRow(label: item.0, value: item.1)
+                LabeledRow(label: item.0, value: item.1, mono: mono)
             }
         }
     }

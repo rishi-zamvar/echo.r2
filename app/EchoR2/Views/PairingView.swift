@@ -121,7 +121,7 @@ struct PairingView: View {
                             let t = PairingCode.normalize(new)
                             if t != new { code = t }
                         }
-                    Text("Run `hub pair` on the hub to get one.")
+                    Text("Run “hub pair” on the hub to get one.")
                         .font(Typography.caption)
                         .foregroundStyle(Palette.textMuted)
                     if let error {

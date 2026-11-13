@@ -27,7 +27,7 @@ struct NewSessionView: View {
                                   isLoading: starting, icon: "sparkles")
                         .disabled(selectedCwd == nil || starting)
                         .padding(.top, Spacing.l)
-                        .accessibilityHint(selectedCwd == nil ? "Choose a folder first" : "")
+                        .accessibilityHint(selectedCwd == nil ? "Choose a folder first" : "Starts Claude in the chosen folder")
                 }
                 .padding(Spacing.l)
             }
