@@ -122,7 +122,7 @@ Plans:
 | 2. Secure Hub & PC Install | 6/7 | In Progress|  |
 | 3. iOS App | 5/5 | Complete   | 2026-11-12 |
 | 4. Push, Recovery & Release | 6/7 | In Progress|  |
-| 5. v1.1 Safety, Chat and UI Rebuild | 0/12 | Planned |  |
+| 5. v1.1 Safety, Chat and UI Rebuild | 9/12 | In Progress|  |
 
 ### Phase 5: v1.1 Safety, Chat and UI Rebuild
 
@@ -138,18 +138,18 @@ Plans:
   5. Test push failures read in plain language; after the APNs key is set to Sandbox & Production, push arrives on the TestFlight build.
   6. The UI follows one design direction with no black surfaces, spring motion, haptics and VoiceOver/Dynamic Type/AA contrast, enforced by snapshot tests (default + XXL), XCUITest flows on a mock hub and accessibility audits.
   7. echo 0.2.0 is on TestFlight and Rishi approves the on-device checklist.
-**Plans:** 12 plans
+**Plans:** 9/12 plans executed
 
 Plans:
-- [ ] 05-01-PLAN.md — P0-1 kill guards (spawned-PID set, Even Terminal parent check, kill log) + 50-restart safety harness (V11-01)
-- [ ] 05-02-PLAN.md — Simulator test harness: SnapshotTesting + XCUITest targets, mock hub, test.sh, DEBUG launch hooks (V11-12) [parallel with 05-01]
-- [ ] 05-03-PLAN.md — Global hooks opt-in, transcript-derived external alerts, D-03 take-over/resume guards, deploy (V11-02, V11-03)
-- [ ] 05-04-PLAN.md — History endpoint + indexed chat events, summary/noise/lastActivity, 7-day dormant externals, deploy (V11-05, V11-07)
-- [ ] 05-05-PLAN.md — POST /pair/auto (owner, tagged, revoke deny-list, rate limit) + plain APNs errors/pushLastError, deploy (V11-04, V11-08)
-- [ ] 05-06-PLAN.md — App: history for every session, Continue here + refusals, always-on composer, relay tolerance, live-hub send proof (V11-03, V11-05, V11-06, V11-13) [parallel with 05-05]
-- [ ] 05-07-PLAN.md — App: auto-pair + code fix, list summary/Other/sort/tones, Settings push messages (V11-04, V11-07, V11-08)
-- [ ] 05-08-PLAN.md — UI rebuild 1: impeccable critique → DESIGN.md + tokens; List, Pairing, Settings, New Session with motion/haptics/a11y (V11-09..11)
-- [ ] 05-09-PLAN.md — UI rebuild 2: chat bubbles/markdown/tool groups/working/jump pill, header, Chat↔Terminal toggle, light terminal (V11-09..11)
+- [x] 05-01-PLAN.md — P0-1 kill guards (spawned-PID set, Even Terminal parent check, kill log) + 50-restart safety harness (V11-01)
+- [x] 05-02-PLAN.md — Simulator test harness: SnapshotTesting + XCUITest targets, mock hub, test.sh, DEBUG launch hooks (V11-12) [parallel with 05-01]
+- [x] 05-03-PLAN.md — Global hooks opt-in, transcript-derived external alerts, D-03 take-over/resume guards, deploy (V11-02, V11-03)
+- [x] 05-04-PLAN.md — History endpoint + indexed chat events, summary/noise/lastActivity, 7-day dormant externals, deploy (V11-05, V11-07)
+- [x] 05-05-PLAN.md — POST /pair/auto (owner, tagged, revoke deny-list, rate limit) + plain APNs errors/pushLastError, deploy (V11-04, V11-08)
+- [x] 05-06-PLAN.md — App: history for every session, Continue here + refusals, always-on composer, relay tolerance, live-hub send proof (V11-03, V11-05, V11-06, V11-13) [parallel with 05-05]
+- [x] 05-07-PLAN.md — App: auto-pair + code fix, list summary/Other/sort/tones, Settings push messages (V11-04, V11-07, V11-08)
+- [x] 05-08-PLAN.md — UI rebuild 1: impeccable critique → DESIGN.md + tokens; List, Pairing, Settings, New Session with motion/haptics/a11y (V11-09..11)
+- [x] 05-09-PLAN.md — UI rebuild 2: chat bubbles/markdown/tool groups/working/jump pill, header, Chat↔Terminal toggle, light terminal (V11-09..11)
 - [ ] 05-10-PLAN.md — Snapshot suite (every screen × state × default/XXL) + accessibility audits + contrast test (V11-11, V11-12)
 - [ ] 05-11-PLAN.md — Remaining XCUITest flows + journey + flake gate; pre-release XcodeBuildMCP/impeccable review (V11-12)
 - [ ] 05-12-PLAN.md — CHECKPOINT: 0.2.0 TestFlight upload, APNs key Sandbox & Production, on-device checklist + live Even Terminal safety check (V11-14)

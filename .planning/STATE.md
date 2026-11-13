@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-status: verifying
+milestone_name: Safety, Chat and UI Rebuild
+status: executing
 stopped_at: Roadmap created
-last_updated: "2026-11-12T02:47:45.589Z"
-last_activity: 2026-11-12
+last_updated: "2026-11-13T04:53:05.284Z"
+last_activity: 2026-11-13
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 1
-  total_plans: 25
-  completed_plans: 16
-  percent: 25
+  total_plans: 37
+  completed_plans: 30
+  percent: 20
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-11-11)
 
 **Core value:** From the phone, anywhere, Rishi can see what every Claude session on the home PC is doing and tell it what to do next, and gets pinged the moment one finishes or needs him.
-**Current focus:** Phase 3 — iOS App
+**Current focus:** Phase 5 — v1.1 Safety, Chat and UI Rebuild
 
 ## Current Position
 
-Phase: 4 (Push, Recovery & Release) — plans 04-01..04-06 complete; 04-07 (human checkpoint: keys, App Store Connect, TestFlight, on-device checklist) next
-Plan: 6 of 7 complete; next 04-07 (human checkpoint)
-Status: Executing Phase 4
-Last activity: 2026-11-12
+Phase: 5 (v1.1 Safety, Chat and UI Rebuild) — plans 05-01..05-09 complete; 05-10 (snapshot suite + a11y audits) next. Phase 4: 04-07 human checkpoint still open
+Plan: 9 of 12 complete; next 05-10
+Status: Executing Phase 5
+Last activity: 2026-11-13
 
-Progress: [████████░░] 83%
+Progress: [████████░░] 81%
 
 ## Performance Metrics
 
@@ -66,6 +66,6 @@ Progress: [████████░░] 83%
 
 ## Session Continuity
 
-Last session: 2026-11-12T02:47:45.580Z
+Last session: 2026-11-13T04:53:05.271Z
 Stopped at: Roadmap created
 Resume file: None
