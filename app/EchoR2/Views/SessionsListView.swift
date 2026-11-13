@@ -3,6 +3,15 @@ import SwiftUI
 struct SessionsListView: View {
     @Environment(AppModel.self) private var app
     @State private var showNew = false
+    @State private var showOther = false
+
+    private var main: [SessionInfo] { app.sessions.filter { $0.noise != true } }
+    private var other: [SessionInfo] { app.sessions.filter { $0.noise == true } }
+
+    private func link(_ s: SessionInfo) -> some View {
+        NavigationLink(value: s.id) { SessionRow(session: s) }.buttonStyle(.plain)
+            .accessibilityIdentifier("sessions.row.\(s.id)")
+    }
 
     private var unreachable: Bool {
         if case .unreachable = app.connectionState { return true }
@@ -17,9 +26,22 @@ struct SessionsListView: View {
                 EmptyState(title: "No sessions", message: "Tap + to start.", systemImage: "terminal")
             } else {
                 LazyVStack(spacing: Spacing.m) {
-                    ForEach(app.sessions) { s in
-                        NavigationLink(value: s.id) { SessionRow(session: s) }.buttonStyle(.plain)
-                            .accessibilityIdentifier("sessions.row.\(s.id)")
+                    ForEach(main) { link($0) }
+                    if !other.isEmpty {
+                        Button {
+                            Haptics.selection()
+                            withAnimation(.spring) { showOther.toggle() }
+                        } label: {
+                            HStack {
+                                Text("Other (\(other.count))").font(Typography.callout)
+                                Spacer()
+                                Image(systemName: showOther ? "chevron.up" : "chevron.down")
+                            }
+                            .foregroundStyle(Palette.textSecondary)
+                            .padding(.top, Spacing.s)
+                        }
+                        .accessibilityIdentifier("sessions.other.toggle")
+                        if showOther { ForEach(other) { link($0) } }
                     }
                 }
                 .padding(Spacing.l)
@@ -27,7 +49,7 @@ struct SessionsListView: View {
             }
         }
         .accessibilityIdentifier("sessions.list")
-        .refreshable { await app.refreshSessions() }
+        .refreshable { Haptics.light(); await app.refreshSessions() }
         // Cancelled by SwiftUI when the view disappears or the scene backgrounds.
         .task { await app.pollSessions() }
         .navigationTitle("echo")
@@ -51,6 +73,8 @@ struct SessionsListView: View {
 
 private struct SessionRow: View {
     let session: SessionInfo
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
 
     private static let relative: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
@@ -58,22 +82,39 @@ private struct SessionRow: View {
         return f
     }()
 
+    private var titleColor: Color {
+        switch session.activity {
+        case .running: Palette.ink
+        case .needsYou: Palette.accentDeep
+        case .idle: Palette.textSecondary
+        }
+    }
+
+    private var when: Date? { session.lastActivityDate ?? session.startedDate }
+
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: Spacing.s) {
                 HStack {
-                    Text(session.displayTitle).font(Typography.heading).foregroundStyle(Palette.ink).lineLimit(1)
+                    if session.activity == .running {
+                        Circle().fill(Palette.primaryDeep).frame(width: 8, height: 8)
+                            .opacity(reduceMotion ? 1 : (pulse ? 0.35 : 1))
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: pulse)
+                            .onAppear { pulse = true }
+                    }
+                    Text(session.displayTitle).font(Typography.heading).foregroundStyle(titleColor).lineLimit(1)
                     Spacer()
                     StateChip(session: session)
                 }
-                if session.isExternal {
-                    if let l = session.label, !l.isEmpty {
-                        Text(l).font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                    }
-                } else if let d = session.startedDate {
-                    Text("started " + Self.relative.localizedString(for: d, relativeTo: Date()))
-                        .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                if let sum = session.summary, !sum.isEmpty, sum != session.displayTitle {
+                    Text(sum).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
                 }
+                HStack {
+                    if session.isExternal, let l = session.label, !l.isEmpty { Text(l) }
+                    Spacer()
+                    if let d = when { Text(Self.relative.localizedString(for: d, relativeTo: Date())) }
+                }
+                .font(Typography.caption).foregroundStyle(Palette.textMuted)
             }
         }
     }
