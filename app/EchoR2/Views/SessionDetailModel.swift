@@ -252,7 +252,7 @@ final class SessionDetailModel {
             else if case .server("bad_cwd", _)? = error as? HubError { actionError = "Folder is no longer allowed on the hub" }
             else if case .server("claude_unavailable", _)? = error as? HubError { actionError = "Claude is unavailable on the hub" }
             else { app.handle(error); actionError = "Resume failed" }
-            Haptics.error()
+            Haptics.failure()
             return false
         }
     }
@@ -267,11 +267,11 @@ final class SessionDetailModel {
             tab = .chat
             await app.refreshSessions()
             restartStream(app: app)
-            Haptics.success()
+            Haptics.paired()
         } catch {
             if let m = refusal(error) { actionError = m }
             else { app.handle(error); actionError = "Couldn't continue here" }
-            Haptics.error()
+            Haptics.failure()
         }
     }
 

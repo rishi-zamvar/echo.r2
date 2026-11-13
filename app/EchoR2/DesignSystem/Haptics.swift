@@ -1,22 +1,30 @@
 import UIKit
 
-/// Single ingress point for haptic feedback. Calls are cheap to ignore on
-/// older devices that don't support Taptic Engine. Use cases:
-///   - `.light`: chip tap, stepper, secondary button
-///   - `.medium`: primary button, sheet present
-///   - `.success`: set logged, feedback sent, onboarding done
-///   - `.warning`: failure-reason sheet opened
-///   - `.error`: network error, validation fail
-///   - `.selection`: stepper increment/decrement, picker change
+/// The single ingress for haptics (DESIGN.md "Haptics", D-12). Views call the
+/// semantic statics only; the generator mapping lives here.
 @MainActor
 enum Haptics {
-    static func light()   { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-    static func medium()  { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
-    static func heavy()   { UIImpactFeedbackGenerator(style: .heavy).impactOccurred() }
-    static func soft()    { UIImpactFeedbackGenerator(style: .soft).impactOccurred() }
-    static func rigid()   { UIImpactFeedbackGenerator(style: .rigid).impactOccurred() }
-    static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
-    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
-    static func warning() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
-    static func error()   { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+    /// Send a message, start a session.
+    static func send() { impact(.medium) }
+    /// A message or state update arrives.
+    static func arrival() { impact(.light) }
+    /// A session changes state.
+    static func stateChange() { impact(.soft) }
+    /// Pull to refresh.
+    static func refresh() { impact(.rigid) }
+    /// Toggle, disclosure, picker choice.
+    static func toggle() { UISelectionFeedbackGenerator().selectionChanged() }
+    /// A destructive confirm opens or fires.
+    static func destructive() { notify(.warning) }
+    /// Any failure shown to the user.
+    static func failure() { notify(.error) }
+    /// Pairing succeeded (also: any explicit success confirmation).
+    static func paired() { notify(.success) }
+
+    private static func impact(_ s: UIImpactFeedbackGenerator.FeedbackStyle) {
+        UIImpactFeedbackGenerator(style: s).impactOccurred()
+    }
+    private static func notify(_ t: UINotificationFeedbackGenerator.FeedbackType) {
+        UINotificationFeedbackGenerator().notificationOccurred(t)
+    }
 }

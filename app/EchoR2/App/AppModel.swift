@@ -85,7 +85,7 @@ final class AppModel {
             UserDefaults.standard.set(host.trimmingCharacters(in: .whitespaces), forKey: Self.hostKey)
             token = r.token
             markOK()
-            Haptics.success()
+            Haptics.paired()
             return .paired
         } catch HubError.server(let code, _) {
             return .refused(code)

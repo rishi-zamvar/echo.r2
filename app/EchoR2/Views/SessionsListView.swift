@@ -29,7 +29,7 @@ struct SessionsListView: View {
                     ForEach(main) { link($0) }
                     if !other.isEmpty {
                         Button {
-                            Haptics.selection()
+                            Haptics.toggle()
                             withAnimation(.spring) { showOther.toggle() }
                         } label: {
                             HStack {
@@ -49,7 +49,7 @@ struct SessionsListView: View {
             }
         }
         .accessibilityIdentifier("sessions.list")
-        .refreshable { Haptics.light(); await app.refreshSessions() }
+        .refreshable { Haptics.arrival(); await app.refreshSessions() }
         // Cancelled by SwiftUI when the view disappears or the scene backgrounds.
         .task { await app.pollSessions() }
         .navigationTitle("echo")
@@ -85,7 +85,7 @@ private struct SessionRow: View {
     private var titleColor: Color {
         switch session.activity {
         case .running: Palette.ink
-        case .needsYou: Palette.accentDeep
+        case .needsYou: Palette.needsYou
         case .idle: Palette.textSecondary
         }
     }
@@ -131,7 +131,7 @@ struct StateChip: View {
         case .success: Palette.success
         case .muted: Palette.textMuted
         case .danger: Palette.danger
-        case .accent: Palette.accentDeep
+        case .accent: Palette.needsYou
         }
     }
 

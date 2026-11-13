@@ -19,7 +19,7 @@ struct SettingsView: View {
 
                 Card {
                     VStack(alignment: .leading, spacing: Spacing.s) {
-                        Eyebrow(text: "Hub")
+                        GroupTitle(text: "Hub")
                         row("Host", app.host)
                         if let h = app.health {
                             row("Name", h.hubName)
@@ -35,7 +35,7 @@ struct SettingsView: View {
 
                 Card {
                     VStack(alignment: .leading, spacing: Spacing.s) {
-                        Eyebrow(text: "Notifications")
+                        GroupTitle(text: "Notifications")
                         row("Permission", app.pushAuthorized.map { $0 ? "allowed" : "off" } ?? "not asked")
                         row("Hub push", app.health?.push ?? "unknown")
                         row("Registered", app.pushRegistered ? "yes" : "no")
@@ -63,7 +63,7 @@ struct SettingsView: View {
 
                 Card {
                     VStack(alignment: .leading, spacing: Spacing.s) {
-                        Eyebrow(text: "App")
+                        GroupTitle(text: "App")
                         row("Version", appVersion)
                     }
                 }
@@ -86,10 +86,10 @@ struct SettingsView: View {
             let r = try await c.testPush()
             if let f = r.results.first(where: { $0.status != 200 }) {
                 testResult = f.message ?? f.reason ?? "Push failed (\(f.status))"
-                Haptics.error()
+                Haptics.failure()
             } else {
                 testResult = "Sent. Check your lock screen."
-                Haptics.success()
+                Haptics.paired()
             }
             await app.bootstrap()
         } catch HubError.server("push_unconfigured", _) {

@@ -59,6 +59,7 @@ const server = http.createServer(async (req, res) => {
   if (!authed(req)) return send(res, 401, { error: 'unauthorized' });
 
   if (p === '/sessions' && req.method === 'GET') return send(res, 200, { epoch: EPOCH, sessions });
+  if (p === '/sessions/roots' && req.method === 'GET') return send(res, 200, { roots: [{ root: '/Users/mock/Projects', dirs: ['echo.r2', 'workoutcoach', 'landing'] }] });
   let m;
   if ((m = p.match(/^\/sessions\/([^/]+)\/history$/)) && req.method === 'GET') {
     if (!byId(m[1])) return send(res, 404, { error: 'not_found' });

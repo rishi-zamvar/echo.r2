@@ -22,7 +22,7 @@ struct PairingView: View {
 
                 Card {
                     VStack(alignment: .leading, spacing: Spacing.m) {
-                        Eyebrow(text: "Hub")
+                        GroupTitle(text: "Hub")
                         TextField("host:8790", text: $host)
                             .font(Typography.mono)
                             .autocorrectionDisabled()
@@ -72,10 +72,10 @@ struct PairingView: View {
         case .refused(let c):
             autoStatus = c == "auto_pair_denied" ? "This device isn't allowed to pair automatically"
                                                  : "Enter a code from `hub pair`"
-            Haptics.error()
+            Haptics.failure()
         case .unreachable:
             autoStatus = "Can't reach hub. Enter a code from `hub pair`"
-            Haptics.error()
+            Haptics.failure()
         }
     }
 
@@ -83,7 +83,7 @@ struct PairingView: View {
         VStack(spacing: Spacing.xl) {
                 Card {
                     VStack(alignment: .leading, spacing: Spacing.m) {
-                        Eyebrow(text: "Pairing code")
+                        GroupTitle(text: "Pairing code")
                         TextField("8 characters", text: $code)
                             .font(Typography.mono)
                             .textInputAutocapitalization(.characters)
@@ -127,12 +127,12 @@ struct PairingView: View {
                 try await app.pair(host: host, code: code, deviceName: UIDevice.current.name)
             } catch HubError.server("bad_code", _) {
                 error = "Wrong or expired code. Get a new one."
-                Haptics.error()
+                Haptics.failure()
             } catch HubError.forbidden {
                 error = "Hub refused this device"
             } catch {
                 self.error = "Can't reach hub"
-                Haptics.error()
+                Haptics.failure()
             }
         }
     }

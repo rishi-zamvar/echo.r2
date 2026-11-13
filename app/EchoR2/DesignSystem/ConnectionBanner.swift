@@ -23,7 +23,7 @@ struct ConnectionBanner: View {
             }
         }
         .onReceive(ticker) { now = $0 }
-        .animation(AnimationToken.medium, value: tone)
+        .animation(Motion.gentle, value: tone)
     }
 
     private enum Tone: Equatable {
@@ -54,7 +54,7 @@ struct ConnectionBanner: View {
 
     private func bannerView(text: String, color: Color) -> some View {
         Button {
-            Haptics.light()
+            Haptics.arrival()
             Task { await app.bootstrap() }
         } label: {
             HStack(spacing: Spacing.s) {
@@ -67,7 +67,7 @@ struct ConnectionBanner: View {
                     .foregroundStyle(Palette.ink)
                 Spacer()
                 Text("Retry")
-                    .eyebrowStyle(color)
+                    .font(Typography.caption.weight(.semibold)).foregroundStyle(Palette.ink)
             }
             .padding(.horizontal, Spacing.l)
             .padding(.vertical, 6)

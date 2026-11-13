@@ -14,10 +14,10 @@ final class ToastCenter: ObservableObject {
         dismissTask?.cancel()
         current = Toast(text: text, kind: kind)
         switch kind {
-        case .success: Haptics.success()
-        case .warning: Haptics.warning()
-        case .error:   Haptics.error()
-        case .info:    Haptics.light()
+        case .success: Haptics.paired()
+        case .warning: Haptics.destructive()
+        case .error:   Haptics.failure()
+        case .info:    Haptics.arrival()
         }
         dismissTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(duration))
@@ -47,7 +47,7 @@ struct ToastOverlay: ViewModifier {
                     toastView(toast)
                         .padding(.top, Spacing.xxl)
                         .transition(.move(edge: .top).combined(with: .opacity))
-                        .animation(AnimationToken.satisfying, value: center.current)
+                        .animation(Motion.gentle, value: center.current)
                 }
             }
     }
