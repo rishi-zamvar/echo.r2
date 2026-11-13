@@ -35,6 +35,7 @@ struct SessionsListView: View {
             ToolbarItem(placement: .topBarLeading) {
                 NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
                     .accessibilityLabel("Settings")
+                    .accessibilityIdentifier("sessions.settings")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showNew = true } label: { Image(systemName: "plus") }

@@ -39,13 +39,19 @@ struct SettingsView: View {
                         row("Permission", app.pushAuthorized.map { $0 ? "allowed" : "off" } ?? "not asked")
                         row("Hub push", app.health?.push ?? "unknown")
                         row("Registered", app.pushRegistered ? "yes" : "no")
+                        if let e = app.health?.pushLastError {
+                            Text("Last push error: \(e.message)").font(Typography.callout).foregroundStyle(Palette.danger)
+                                .accessibilityIdentifier("settings.push.lasterror")
+                        }
                         if let e = app.pushError {
                             Text(e).font(Typography.callout).foregroundStyle(Palette.danger)
                         }
                         SecondaryButton(title: "Send test push") { Task { await sendTest() } }
                             .disabled(sending)
+                            .accessibilityIdentifier("settings.push.test")
                         if let r = testResult {
                             Text(r).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                                .accessibilityIdentifier("settings.push.result")
                         }
                         if app.pushAuthorized == false {
                             SecondaryButton(title: "Open iOS Settings") {
@@ -78,9 +84,14 @@ struct SettingsView: View {
         defer { sending = false }
         do {
             let r = try await c.testPush()
-            var t = "Sent to \(r.sent) device(s)"
-            if let f = r.results.first, f.status != 200 { t += ": \(f.status) \(f.reason ?? "")" }
-            testResult = t
+            if let f = r.results.first(where: { $0.status != 200 }) {
+                testResult = f.message ?? f.reason ?? "Push failed (\(f.status))"
+                Haptics.error()
+            } else {
+                testResult = "Sent. Check your lock screen."
+                Haptics.success()
+            }
+            await app.bootstrap()
         } catch HubError.server("push_unconfigured", _) {
             testResult = "Hub has no APNs key yet"
         } catch HubError.server("no_token", _) {

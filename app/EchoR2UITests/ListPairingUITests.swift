@@ -8,7 +8,7 @@ final class ListPairingUITests: XCTestCase {
 
     func testAutoPairFirstLaunch() {
         let app = launchApp(token: nil)
-        XCTAssertTrue(el(app, "sessions.list").waitForExistence(timeout: 10))
+        XCTAssertTrue(el(app, "sessions.row.\(HUB_RUNNING)").waitForExistence(timeout: 10))
     }
 
     func testAutoPairDeniedFallsBackToCode() {
@@ -20,7 +20,7 @@ final class ListPairingUITests: XCTestCase {
         code.typeText("abcd-2345")
         XCTAssertEqual(code.value as? String, "ABCD2345")
         app.buttons["pair.submit"].tap()
-        XCTAssertTrue(el(app, "sessions.list").waitForExistence(timeout: 10))
+        XCTAssertTrue(el(app, "sessions.row.\(HUB_RUNNING)").waitForExistence(timeout: 10))
     }
 
     func testListSummaryAndOther() {
@@ -34,7 +34,7 @@ final class ListPairingUITests: XCTestCase {
 
     func testPushTestShowsPlainError() {
         let app = launchApp()
-        XCTAssertTrue(el(app, "sessions.list").waitForExistence(timeout: 10))
+        XCTAssertTrue(el(app, "sessions.row.\(HUB_RUNNING)").waitForExistence(timeout: 10))
         app.buttons["sessions.settings"].tap()
         let t = app.buttons["settings.push.test"]
         XCTAssertTrue(t.waitForExistence(timeout: 5))

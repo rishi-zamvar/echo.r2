@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+enum AutoPairOutcome: Equatable {
+    case paired
+    case refused(String)
+    case unreachable
+}
+
 enum ConnectionState: Equatable {
     case unknown
     case healthy
@@ -24,6 +30,8 @@ final class AppModel {
     var pushAuthorized: Bool?
     var pushRegistered = false
     var pushError: String?
+    /// One auto-pair attempt per launch / per forget() so a refusal never loops (T-05-24).
+    var autoPairTried = false
 
     var isPaired: Bool { token != nil }
 
@@ -59,14 +67,37 @@ final class AppModel {
     func pair(host: String, code: String, deviceName: String) async throws {
         guard let base = HubClient.baseURL(from: host) else { throw HubError.transport("Invalid host") }
         let r = try await HubClient(base: base, token: nil).pair(code: code.uppercased(), deviceName: deviceName)
-        try Keychain.save(r.token, account: Keychain.account)
+        // Unsigned simulator test builds have no keychain entitlement; keep the token in memory so this session works.
+        try? Keychain.save(r.token, account: Keychain.account)
         UserDefaults.standard.set(host.trimmingCharacters(in: .whitespaces), forKey: Self.hostKey)
         self.host = host.trimmingCharacters(in: .whitespaces)
         token = r.token
         markOK()
     }
 
+    func autoPair(deviceName: String) async -> AutoPairOutcome {
+        autoPairTried = true
+        guard let c = client() else { return .unreachable }
+        do {
+            let r = try await HubClient(base: c.base, token: nil).pairAuto(deviceName: deviceName)
+            // Unsigned simulator test builds have no keychain entitlement; keep the token in memory so this session works.
+        try? Keychain.save(r.token, account: Keychain.account)
+            UserDefaults.standard.set(host.trimmingCharacters(in: .whitespaces), forKey: Self.hostKey)
+            token = r.token
+            markOK()
+            Haptics.success()
+            return .paired
+        } catch HubError.server(let code, _) {
+            return .refused(code)
+        } catch HubError.forbidden {
+            return .refused("forbidden")
+        } catch {
+            return .unreachable
+        }
+    }
+
     func forget() {
+        autoPairTried = false
         Keychain.delete(account: Keychain.account)
         UserDefaults.standard.removeObject(forKey: Self.hostKey)
         token = nil
