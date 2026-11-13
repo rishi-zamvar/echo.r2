@@ -43,6 +43,7 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        UIUserInterfaceStyle: Light
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSExceptionDomains:

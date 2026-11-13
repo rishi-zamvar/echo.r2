@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Slim status strip pinned to the top of MainTabView. Stays out of the way
-/// when connection is healthy; pulses amber after 45s of silence, red after
-/// 2 minutes. Tap to retry.
+/// Slim paper strip above the session list. Hidden while the hub is healthy;
+/// amber after 45 s of silence, red when unreachable. Tap to retry.
 struct ConnectionBanner: View {
     @Environment(AppModel.self) private var app
     @State private var now: Date = Date()
@@ -15,15 +14,13 @@ struct ConnectionBanner: View {
             case .healthy:
                 EmptyView()
             case .amber:
-                bannerView(text: "Backend quiet for \(secondsAgoText)", color: Palette.warning)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                bannerView(text: "Hub quiet for \(secondsAgoText)", color: Palette.warning)
             case .red(let reason):
                 bannerView(text: reason, color: Palette.danger)
-                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .onReceive(ticker) { now = $0 }
-        .animation(Motion.gentle, value: tone)
+        .motion(Motion.gentle, value: tone)
     }
 
     private enum Tone: Equatable {
@@ -35,48 +32,48 @@ struct ConnectionBanner: View {
     private var tone: Tone {
         if app.demoMode { return .healthy }
         switch app.connectionState {
-        case .unreachable(let r): return .red("Offline — \(r.prefix(40))")
+        case .unreachable(let r): return .red("Can't reach hub: \(r.prefix(60))")
         case .unknown: return .amber
         case .healthy:
             guard let last = app.lastSuccessfulCall else { return .amber }
             let age = now.timeIntervalSince(last)
-            if age > 120 { return .red("No backend contact for \(Int(age))s") }
-            if age > 45  { return .amber }
+            if age > 120 { return .red("No contact with hub for \(Int(age)) s") }
+            if age > 45 { return .amber }
             return .healthy
         }
     }
 
     private var secondsAgoText: String {
-        guard let last = app.lastSuccessfulCall else { return "—" }
-        let age = Int(now.timeIntervalSince(last))
-        return "\(age)s"
+        guard let last = app.lastSuccessfulCall else { return "a moment" }
+        return "\(Int(now.timeIntervalSince(last))) s"
     }
 
     private func bannerView(text: String, color: Color) -> some View {
         Button {
-            Haptics.arrival()
+            Haptics.toggle()
             Task { await app.bootstrap() }
         } label: {
-            HStack(spacing: Spacing.s) {
-                Circle()
-                    .fill(color)
-                    .frame(width: 8, height: 8)
+            HStack(spacing: Spacing.m) {
+                Circle().fill(color).frame(width: 8, height: 8).accessibilityHidden(true)
                 Text(text)
-                    .font(Typography.caption)
-                    .tracking(0.3)
+                    .font(Typography.callout)
                     .foregroundStyle(Palette.ink)
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Text("Retry")
-                    .font(Typography.caption.weight(.semibold)).foregroundStyle(Palette.ink)
+                    .font(Typography.callout.weight(.semibold))
+                    .foregroundStyle(Palette.primaryDeep)
             }
             .padding(.horizontal, Spacing.l)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
-            .background(color.opacity(0.18))
+            .padding(.vertical, Spacing.m)
+            .frame(minHeight: 44)
+            .background(Palette.paper)
             .overlay(alignment: .bottom) {
-                Rectangle().fill(color.opacity(0.35)).frame(height: 0.5)
+                Rectangle().fill(color.opacity(0.5)).frame(height: 1)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle(scale: 1))
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .accessibilityLabel(text)
+        .accessibilityHint("Retries the connection")
     }
 }

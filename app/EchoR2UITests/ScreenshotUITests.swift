@@ -47,7 +47,7 @@ final class ScreenshotUITests: XCTestCase {
         sleep(1)
         shot("list")
 
-        app.buttons["New session"].firstMatch.tap()
+        app.buttons["sessions.new"].firstMatch.tap()
         sleep(2)
         shot("new-session")
         app.buttons["Cancel"].firstMatch.tap()

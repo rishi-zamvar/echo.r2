@@ -15,51 +15,24 @@ struct NewSessionView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if let roots {
-                    ForEach(roots, id: \.root) { r in
-                        Section {
-                            ForEach(Array(r.cwdOptions.enumerated()), id: \.element) { i, cwd in
-                                Button {
-                                    selectedCwd = cwd
-                                } label: {
-                                    HStack {
-                                        Text(i == 0 ? "(this folder)" : (cwd as NSString).lastPathComponent)
-                                            .foregroundStyle(Palette.ink)
-                                        Spacer()
-                                        if selectedCwd == cwd { Image(systemName: "checkmark").foregroundStyle(Palette.primaryDeep) }
-                                    }
-                                }
-                            }
-                        } header: {
-                            Text(r.root).font(Typography.caption.monospaced())
-                        }
-                    }
-                } else if loadFailed {
-                    VStack(spacing: Spacing.m) {
-                        Text("Can't load folders").foregroundStyle(Palette.danger)
-                        SecondaryButton(title: "Retry") { Task { await load() } }
-                    }
-                } else {
-                    ProgressView()
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.m) {
+                    GroupTitle(text: "Folder")
+                    folders.motion(Motion.gentle, value: roots == nil)
 
-                Section("First prompt (optional)") {
-                    TextEditor(text: $prompt)
-                        .frame(minHeight: 100)
-                        .onChange(of: prompt) { _, v in
-                            if v.count > Self.maxPrompt { prompt = String(v.prefix(Self.maxPrompt)) }
-                        }
-                }
+                    GroupTitle(text: "First prompt").padding(.top, Spacing.l)
+                    promptCard
 
-                Section {
-                    PrimaryButton(title: "Start", action: { Task { await start() } }, isLoading: starting)
+                    PrimaryButton(title: "Start session", action: { Task { await start() } },
+                                  isLoading: starting, icon: "sparkles")
                         .disabled(selectedCwd == nil || starting)
-                        .opacity(selectedCwd == nil ? 0.5 : 1)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+                        .padding(.top, Spacing.l)
+                        .accessibilityHint(selectedCwd == nil ? "Choose a folder first" : "")
                 }
+                .padding(Spacing.l)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .screenBackground()
             .navigationTitle("New session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -68,17 +41,107 @@ struct NewSessionView: View {
             .task { await load() }
             .wcoachToasts()
         }
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder private var folders: some View {
+        if let roots {
+            ForEach(roots, id: \.root) { r in
+                Card(padding: 0) {
+                    ForEach(Array(r.cwdOptions.enumerated()), id: \.element) { i, cwd in
+                        if i > 0 { Rectangle().fill(Palette.divider).frame(height: 0.75).padding(.leading, 52) }
+                        folderRow(cwd, name: i == 0 ? (r.root as NSString).lastPathComponent : (cwd as NSString).lastPathComponent,
+                                  isRoot: i == 0)
+                    }
+                }
+            }
+        } else if loadFailed {
+            Card {
+                VStack(alignment: .leading, spacing: Spacing.m) {
+                    Label("Can't load folders from the hub.", systemImage: "exclamationmark.triangle")
+                        .font(Typography.callout).foregroundStyle(Palette.danger)
+                    SecondaryButton(title: "Try again") { Task { await load() } }
+                }
+            }
+            .transition(.opacity)
+        } else {
+            VStack(spacing: Spacing.m) { SkeletonRow(); SkeletonRow() }
+                .accessibilityElement()
+                .accessibilityLabel("Loading folders")
+        }
+    }
+
+    private func folderRow(_ cwd: String, name: String, isRoot: Bool) -> some View {
+        let selected = selectedCwd == cwd
+        return Button {
+            Haptics.toggle()
+            Motion.animate(Motion.snappy) { selectedCwd = cwd }
+        } label: {
+            HStack(spacing: Spacing.m) {
+                Image(systemName: selected ? "folder.fill" : "folder")
+                    .font(Typography.body)
+                    .foregroundStyle(selected ? Palette.primaryDeep : Palette.textMuted)
+                    .frame(width: 24)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isRoot ? "\(name) (whole folder)" : name)
+                        .font(Typography.body.weight(selected ? .semibold : .regular))
+                        .foregroundStyle(Palette.ink)
+                    if isRoot {
+                        Text(cwd).font(Typography.caption.monospaced()).foregroundStyle(Palette.textMuted)
+                    }
+                }
+                Spacer(minLength: Spacing.s)
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Palette.primaryDeep)
+                    .opacity(selected ? 1 : 0)
+                    .scaleEffect(selected ? 1 : 0.6)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, Spacing.l)
+            .padding(.vertical, Spacing.m)
+            .frame(minHeight: 52)
+            .background(selected ? Palette.primary.opacity(0.14) : .clear)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isRoot ? "\(name), whole folder" : name)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var promptCard: some View {
+        Card(padding: Spacing.m) {
+            ZStack(alignment: .topLeading) {
+                if prompt.isEmpty {
+                    Text("Optional. What should Claude start on?")
+                        .font(Typography.body)
+                        .foregroundStyle(Palette.textMuted)
+                        .padding(.horizontal, 5).padding(.vertical, 8)
+                        .accessibilityHidden(true)
+                }
+                TextEditor(text: $prompt)
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.ink)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 120)
+                    .accessibilityLabel("First prompt, optional")
+                    .onChange(of: prompt) { _, v in
+                        if v.count > Self.maxPrompt { prompt = String(v.prefix(Self.maxPrompt)) }
+                    }
+            }
+        }
     }
 
     private func load() async {
         guard let c = app.client() else { return }
         loadFailed = false
         do { roots = try await c.roots().roots }
-        catch { app.handle(error); loadFailed = true }
+        catch { app.handle(error); loadFailed = true; Haptics.failure() }
     }
 
     private func start() async {
         guard let cwd = selectedCwd, let c = app.client() else { return }
+        Haptics.send()
         starting = true
         defer { starting = false }
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -88,14 +151,14 @@ struct NewSessionView: View {
             dismiss()
             onCreated(id)
         } catch HubError.server("bad_cwd", _) {
-            ToastCenter.shared.show("Folder not allowed", kind: .error)
+            ToastCenter.shared.show("That folder isn't allowed on the hub", kind: .error)
         } catch HubError.server("claude_unavailable", _) {
-            ToastCenter.shared.show("Claude not available on hub", kind: .error)
+            ToastCenter.shared.show("Claude isn't available on the hub", kind: .error)
         } catch HubError.server("spawn_failed", _) {
             ToastCenter.shared.show("Couldn't start Claude", kind: .error)
         } catch {
             app.handle(error)
-            ToastCenter.shared.show("Can't reach hub", kind: .error)
+            ToastCenter.shared.show("Can't reach the hub", kind: .error)
         }
     }
 }

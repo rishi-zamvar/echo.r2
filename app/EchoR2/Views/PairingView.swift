@@ -18,37 +18,37 @@ struct PairingView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: Spacing.xl) {
-                AppMark().padding(.top, Spacing.xxl)
+                AppMark()
+                    .padding(.top, Spacing.xxxl)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("echo")
+                    .accessibilityAddTraits(.isHeader)
 
-                Card {
-                    VStack(alignment: .leading, spacing: Spacing.m) {
-                        GroupTitle(text: "Hub")
-                        TextField("host:8790", text: $host)
-                            .font(Typography.mono)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.URL)
-                            .accessibilityIdentifier("pair.host")
-                        hubInfo
-                    }
-                }
+                Text("Connect this phone to the hub on your home PC.")
+                    .font(Typography.body)
+                    .foregroundStyle(Palette.textSecondary)
+                    .multilineTextAlignment(.center)
 
                 if autoRunning {
-                    HStack(spacing: Spacing.m) {
-                        ProgressView()
-                        Text("Pairing automatically…").font(Typography.callout)
+                    Card {
+                        HStack(spacing: Spacing.m) {
+                            ProgressView().tint(Palette.primaryDeep)
+                            Text("Pairing with your hub…").font(Typography.body).foregroundStyle(Palette.ink)
+                        }
                     }
+                    .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("pair.auto.status")
-                } else if app.autoPairTried {
-                    if let autoStatus {
-                        Text(autoStatus).font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                            .accessibilityIdentifier("pair.auto.status")
-                    }
-                    codeFields
+                    .transition(.opacity)
+                } else {
+                    hubCard.transition(.opacity)
+                    if app.autoPairTried { codeFields.transition(.opacity.combined(with: .move(edge: .bottom))) }
                 }
             }
             .padding(Spacing.l)
+            .motion(Motion.gentle, value: autoRunning)
+            .motion(Motion.gentle, value: app.autoPairTried)
         }
+        .scrollDismissesKeyboard(.interactively)
         .onAppear { if host.isEmpty { host = app.host } }
         .task { await runAutoPair() }
         // Re-runs (and cancels the previous run) on every host edit; sleep = debounce.
@@ -70,52 +70,97 @@ struct PairingView: View {
         switch r {
         case .paired: break
         case .refused(let c):
-            autoStatus = c == "auto_pair_denied" ? "This device isn't allowed to pair automatically"
-                                                 : "Enter a code from `hub pair`"
+            autoStatus = c == "auto_pair_denied" ? "This device isn't allowed to pair automatically. Use a code instead."
+                                                 : "Automatic pairing didn't work. Use a code instead."
             Haptics.failure()
         case .unreachable:
-            autoStatus = "Can't reach hub. Enter a code from `hub pair`"
+            autoStatus = "Can't reach the hub automatically. Use a code instead."
             Haptics.failure()
         }
     }
 
-    @ViewBuilder private var codeFields: some View {
-        VStack(spacing: Spacing.xl) {
-                Card {
-                    VStack(alignment: .leading, spacing: Spacing.m) {
-                        GroupTitle(text: "Pairing code")
-                        TextField("8 characters", text: $code)
-                            .font(Typography.mono)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled()
-                            .accessibilityIdentifier("pair.code")
-                            .onChange(of: code) { _, new in
-                                let t = PairingCode.normalize(new)
-                                if t != new { code = t }
-                            }
-                        if let error {
-                            Text(error).font(Typography.callout).foregroundStyle(Palette.danger)
+    private var hubCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                fieldLabel("Hub address")
+                TextField("host:8790", text: $host, prompt: Text("host:8790").foregroundStyle(Palette.textMuted))
+                    .font(Typography.mono)
+                    .foregroundStyle(Palette.ink)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .frame(minHeight: 44)
+                    .accessibilityLabel("Hub address")
+                    .accessibilityIdentifier("pair.host")
+                hubInfo
+            }
+        }
+    }
+
+    private var codeFields: some View {
+        VStack(spacing: Spacing.l) {
+            if let autoStatus {
+                Label(autoStatus, systemImage: "info.circle")
+                    .font(Typography.callout)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("pair.auto.status")
+            }
+            Card {
+                VStack(alignment: .leading, spacing: Spacing.s) {
+                    fieldLabel("Pairing code")
+                    TextField("8 characters", text: $code, prompt: Text("8 characters").foregroundStyle(Palette.textMuted))
+                        .font(Typography.mono)
+                        .foregroundStyle(Palette.ink)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .frame(minHeight: 44)
+                        .accessibilityLabel("Pairing code")
+                        .accessibilityIdentifier("pair.code")
+                        .onChange(of: code) { _, new in
+                            let t = PairingCode.normalize(new)
+                            if t != new { code = t }
                         }
+                    Text("Run `hub pair` on the hub to get one.")
+                        .font(Typography.caption)
+                        .foregroundStyle(Palette.textMuted)
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.circle")
+                            .font(Typography.callout)
+                            .foregroundStyle(Palette.danger)
+                            .transition(.opacity)
                     }
                 }
-
-                PrimaryButton(title: "Pair", action: pair, isLoading: pairing)
-                    .disabled(!canPair)
-                    .opacity(canPair ? 1 : 0.5)
-                    .accessibilityIdentifier("pair.submit")
+                .motion(Motion.snappy, value: error)
+            }
+            PrimaryButton(title: "Pair", action: pair, isLoading: pairing)
+                .disabled(!canPair)
+                .accessibilityIdentifier("pair.submit")
         }
+    }
+
+    private func fieldLabel(_ s: String) -> some View {
+        Text(s).font(Typography.callout.weight(.semibold)).foregroundStyle(Palette.textSecondary)
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder private var hubInfo: some View {
         switch info {
         case .success(let h):
-            Text("\(h.hubName) · \(h.os) · \(h.gitSha)")
-                .font(Typography.caption).foregroundStyle(Palette.primaryDeep)
+            status("Found \(h.hubName) · \(h.os)", color: Palette.running)
         case .failure:
-            Text("Can't reach hub").font(Typography.caption).foregroundStyle(Palette.danger)
+            status("Can't reach this address", color: Palette.danger)
         case nil:
             EmptyView()
         }
+    }
+
+    private func status(_ text: String, color: Color) -> some View {
+        HStack(spacing: Spacing.s) {
+            Circle().fill(color).frame(width: 7, height: 7).accessibilityHidden(true)
+            Text(text).font(Typography.caption).foregroundStyle(color)
+        }
+        .transition(.opacity)
     }
 
     private func pair() {
@@ -126,12 +171,13 @@ struct PairingView: View {
             do {
                 try await app.pair(host: host, code: code, deviceName: UIDevice.current.name)
             } catch HubError.server("bad_code", _) {
-                error = "Wrong or expired code. Get a new one."
+                error = "Wrong or expired code. Run “hub pair” for a new one."
                 Haptics.failure()
             } catch HubError.forbidden {
-                error = "Hub refused this device"
+                error = "The hub refused this device."
+                Haptics.failure()
             } catch {
-                self.error = "Can't reach hub"
+                self.error = "Can't reach the hub. Check the address and Tailscale."
                 Haptics.failure()
             }
         }

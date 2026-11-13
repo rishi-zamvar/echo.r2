@@ -10,6 +10,8 @@ enum Motion {
     static let list: Animation = .spring(response: 0.42, dampingFraction: 0.84)
     /// Screen-level swaps: pairing to list, banners, loading/empty/error.
     static let gentle: Animation = .spring(response: 0.50, dampingFraction: 0.86)
+    /// Slow breath for the running-session dot. Never used under Reduce Motion.
+    static let breathe: Animation = .easeInOut(duration: 1.2).repeatForever(autoreverses: true)
     /// Reduce Motion fallback.
     static let fade: Animation = .easeInOut(duration: 0.2)
 
