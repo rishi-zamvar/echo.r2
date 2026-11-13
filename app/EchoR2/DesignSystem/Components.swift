@@ -182,3 +182,17 @@ struct SkeletonRow: View {
         Capsule().fill(Palette.surfaceAlt).frame(width: width, height: height)
     }
 }
+
+// MARK: - Live dot
+
+/// Breathing sage dot for a running session; still under Reduce Motion.
+struct LiveDot: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var breathe = false
+    var body: some View {
+        Circle().fill(Palette.running).frame(width: 7, height: 7)
+            .opacity(breathe ? 0.3 : 1)
+            .onAppear { if !reduceMotion { withAnimation(Motion.breathe) { breathe = true } } }
+            .accessibilityHidden(true)
+    }
+}

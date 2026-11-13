@@ -115,9 +115,7 @@ struct SessionsListView: View {
 
 private struct SessionRow: View {
     let session: SessionInfo
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
-    @State private var breathe = false
 
     private static let relative: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
@@ -164,9 +162,7 @@ private struct SessionRow: View {
                 }
                 HStack(spacing: Spacing.s) {
                     if session.activity == .running {
-                        Circle().fill(Palette.running).frame(width: 7, height: 7)
-                            .opacity(breathe ? 0.3 : 1)
-                            .onAppear { if !reduceMotion { withAnimation(Motion.breathe) { breathe = true } } }
+                        LiveDot()
                         Text("Live").foregroundStyle(Palette.running)
                     }
                     if let origin { Text(origin) }

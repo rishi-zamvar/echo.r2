@@ -51,8 +51,10 @@ final class SessionDetailModel {
         tab = (info?.isExternal ?? false) ? .chat : (saved ?? .chat)
         let t = TerminalView(frame: .zero, font: UIFont.monospacedSystemFont(ofSize: 12, weight: .regular),
                              options: TerminalOptions(scrollback: 5000))
-        t.nativeBackgroundColor = UIColor(Palette.ink)
-        t.nativeForegroundColor = UIColor(Palette.textOnDark)
+        // D-10: paper/ink by default; the dark theme is an opt-in (applyTerminalTheme).
+        t.nativeBackgroundColor = UIColor(Palette.paper)
+        t.nativeForegroundColor = UIColor(Palette.ink)
+        t.selectedTextBackgroundColor = UIColor(Palette.primary)
         t.allowMouseReporting = false  // T-03-22
         t.inputAccessoryView = nil  // ExtraKeysBar replaces it
         terminal = t
@@ -160,6 +162,15 @@ final class SessionDetailModel {
             case .connecting: break
             }
         }
+    }
+
+    @ObservationIgnored private var themedDark = false
+    /// Recolours the existing TerminalView in place (scrollback kept). Dark is warm ink, never black.
+    func applyTerminalTheme(dark: Bool) {
+        guard dark != themedDark else { return }
+        themedDark = dark
+        terminal.nativeBackgroundColor = UIColor(dark ? Palette.ink : Palette.paper)
+        terminal.nativeForegroundColor = UIColor(dark ? Palette.paper : Palette.ink)
     }
 
     /// Feeds queued bytes in 64 KB slices, yielding between slices (pitfall 5).
